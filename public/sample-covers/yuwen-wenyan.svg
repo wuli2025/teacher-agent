@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#efe6d2"/><stop offset="1" stop-color="#d8c39a"/>
+  </linearGradient></defs>
+  <rect width="800" height="450" fill="url(#g)"/>
+  <rect x="0" y="300" width="800" height="150" fill="#7a5c22" opacity="0.12"/><line x1="60" y1="70" x2="60" y2="250" stroke="#7a5c22" stroke-opacity="0.18" stroke-width="10"/><line x1="130" y1="70" x2="130" y2="250" stroke="#7a5c22" stroke-opacity="0.18" stroke-width="10"/><line x1="200" y1="70" x2="200" y2="250" stroke="#7a5c22" stroke-opacity="0.18" stroke-width="10"/><line x1="270" y1="70" x2="270" y2="250" stroke="#7a5c22" stroke-opacity="0.18" stroke-width="10"/><line x1="340" y1="70" x2="340" y2="250" stroke="#7a5c22" stroke-opacity="0.18" stroke-width="10"/><line x1="410" y1="70" x2="410" y2="250" stroke="#7a5c22" stroke-opacity="0.18" stroke-width="10"/><line x1="480" y1="70" x2="480" y2="250" stroke="#7a5c22" stroke-opacity="0.18" stroke-width="10"/><line x1="550" y1="70" x2="550" y2="250" stroke="#7a5c22" stroke-opacity="0.18" stroke-width="10"/><line x1="620" y1="70" x2="620" y2="250" stroke="#7a5c22" stroke-opacity="0.18" stroke-width="10"/>
+  <rect x="56" y="196" width="46" height="6" rx="3" fill="#7a5c22"/>
+  <text x="56" y="255" font-family="'Noto Serif SC','Songti SC',serif" font-size="52" font-weight="700" fill="#232323">高考文言文阅读突破</text>
+  <text x="58" y="300" font-family="'Noto Sans SC',sans-serif" font-size="24" fill="#5a5a5a">实词虚词 · 句读章法</text>
+</svg>

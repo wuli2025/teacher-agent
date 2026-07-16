@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""genimg — text-to-image CLI shared by every agent under test.
+
+    genimg "<prompt>" <output.png> [--ratio 1:1|16:9|9:16|4:3]
+
+Writes the image to <output.png> and prints the path. Exit 0 on success.
+Backed by MiniMax image-01. Retries transient failures a few times.
+"""
+import json
+import os
+import sys
+import time
+import urllib.request
+import urllib.error
+
+API = "https://api.minimaxi.com/v1/image_generation"
+KEY = os.environ.get("MINIMAX_API_KEY") or os.environ.get("MINIMAX_KEY") or ""
+
+
+def die(msg, code=1):
+    print(f"genimg: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def main():
+    args = [a for a in sys.argv[1:]]
+    ratio = "1:1"
+    if "--ratio" in args:
+        i = args.index("--ratio")
+        try:
+            ratio = args[i + 1]
+        except IndexError:
+            die("--ratio needs a value")
+        del args[i:i + 2]
+    if len(args) < 2:
+        die('usage: genimg "<prompt>" <output.png> [--ratio 16:9]', 2)
+    prompt, out = args[0], args[1]
+    if not KEY:
+        die("MINIMAX_API_KEY is not set")
+
+    body = json.dumps({
+        "model": "image-01",
+        "prompt": prompt,
+        "n": 1,
+        "response_format": "url",
+        "aspect_ratio": ratio,
+        "prompt_optimizer": True,
+    }).encode()
+
+    url = None
+    last = ""
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(
+                API, data=body,
+                headers={"authorization": "Bearer " + KEY, "content-type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=180) as r:
+                obj = json.loads(r.read())
+            urls = ((obj.get("data") or {}).get("image_urls")) or []
+            if urls:
+                url = urls[0]
+                break
+            last = json.dumps(obj.get("base_resp") or obj)[:200]
+        except (urllib.error.URLError, urllib.error.HTTPError, ValueError, TimeoutError) as e:
+            last = str(e)[:200]
+        time.sleep(2 + attempt * 3)
+    if not url:
+        die(f"generation failed: {last}")
+
+    d = os.path.dirname(os.path.abspath(out))
+    if d:
+        os.makedirs(d, exist_ok=True)
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=180) as r, open(out, "wb") as f:
+                f.write(r.read())
+            break
+        except (urllib.error.URLError, TimeoutError) as e:
+            last = str(e)[:200]
+            time.sleep(2)
+    else:
+        die(f"download failed: {last}")
+
+    print(os.path.abspath(out))
+
+
+if __name__ == "__main__":
+    main()

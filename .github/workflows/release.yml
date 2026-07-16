@@ -1,0 +1,217 @@
+# ─────────────────────────────────────────────────────────────
+# 发版 + 自动更新产物发布（跨平台：Windows + macOS）
+# 打一个 v* 标签（如 v0.2.10）推上来，会在 Windows 与 macOS 两个 runner 上并行
+# 构建、用更新私钥签名，并把各自的安装包 + .sig + latest.json 上传到同一个 GitHub Release。
+#   · Windows → NSIS 安装包（.exe）
+#   · macOS   → universal（Intel + Apple Silicon 通用）.dmg / .app
+# tauri-action 会把两端的平台条目合并进同一份 latest.json，应用端据此自动升级。
+#
+# 需要在仓库 Settings → Secrets and variables → Actions 配置：
+#   TAURI_SIGNING_PRIVATE_KEY           = 更新私钥文件全文（单行无换行）
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  = 更新私钥密码
+#
+# 关于 macOS 签名/公证（可选，未配则产未签名包）：
+#   未签名 .dmg 用户首次打开会被 Gatekeeper 拦，需右键→打开，或
+#   `xattr -dr com.apple.quarantine /Applications/Polaris.app`。
+#   若要消除提示并让 mac 自动更新稳定生效，再补这些 secret 并在 tauri.conf 配 signingIdentity：
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY /
+#   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID（这里默认不强制，留空即跳过签名）。
+# ─────────────────────────────────────────────────────────────
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  verify:
+    name: Verify tagged source
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm run build
+      - name: Rust library tests
+        working-directory: src-tauri
+        run: cargo test --lib
+      - name: CLI compile guard
+        working-directory: src-tauri
+        run: cargo check -p polaris-cli
+
+  release:
+    needs: verify
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows：只出 NSIS 安装包（保持与原有产物一致）
+          # --features voice-live：桌面实时语音输入(麦克风 cpal+热键 rdev+注入 enigo,
+          #   自动带上 voice-asr 的 sherpa-onnx + SenseVoice 识别核)。
+          #   注:voice-asr 已拆分为「仅识别核」,桌面要本机录音必须用 voice-live。
+          - platform: windows-latest
+            args: "--bundles nsis --features voice-live"
+            rust_targets: ""
+          # macOS：universal 通用二进制（一个包同时覆盖 Intel 与 Apple Silicon）
+          # 本版 mac 暂不开 voice-live：universal 需把两架构的 sherpa/onnxruntime dylib lipo
+          # 成通用并配 @rpath,这套无 mac 真机/CI 无法验证;缺 dylib 会导致 app 启动即崩,
+          # 风险太高。mac 本地语音延后到能在 mac CI 验证后再补(Win 已端到端实测,先发 Win)。
+          - platform: macos-latest
+            args: "--target universal-apple-darwin --bundles app,dmg"
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      # voice-asr 的 sherpa-rs 用 bindgen 生成绑定 → 需 libclang。
+      #   · Windows runner 预装 LLVM 于 C:\Program Files\LLVM,显式指给 bindgen 最稳。
+      #   · macOS 的 libclang 随 Xcode 命令行工具走,clang-sys 经 xcrun 自动发现,无需额外装。
+      - name: Point bindgen at libclang (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $p = "C:\Program Files\LLVM\bin"
+          if (-not (Test-Path "$p\libclang.dll")) { choco install llvm -y }
+          "LIBCLANG_PATH=$p" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # macOS：audiopus_sys 从源码静态编译 libopus(universal 每个 arch 各编一次),
+      # 需要 autotools(autoreconf/automake/libtool)。runner 默认没有 autoreconf,
+      # 不装会报 `autoreconf: command not found` → Failed to autogen Opus。
+      # 不走 `brew install opus`：Homebrew 只出 host 架构(arm64),x86_64 slice 链不上。
+      - name: Install macOS build deps (autotools for audiopus/libopus)
+        if: matrix.platform == 'macos-latest'
+        run: brew install autoconf automake libtool
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: npm install
+
+      - name: Build, sign & publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # 不传任何 APPLE_* 环境变量：空字符串会让 Tauri 的 bundler 误以为有证书而尝试
+          # `security import ""` → SecKeychainItemImport 失败。mac 走 ad-hoc 签名
+          # (tauri.conf bundle.macOS.signingIdentity = "-")，根本不需要 Apple 证书。
+        with:
+          # tauri-action 只负责「构建 + 用更新私钥签名」,不在此处建 Release:
+          # 两个平台的产物要合并进同一份 latest.json,得等两边都跑完 → 交给下面的 publish job。
+          args: ${{ matrix.args }}
+
+      - name: Upload bundles as artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.platform }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            src-tauri/target/release/bundle/**
+            src-tauri/target/universal-apple-darwin/release/bundle/**
+
+  # ─────────────────────────────────────────────────────────────
+  # 发布：等两个平台都构建完 → 收齐安装包与 .sig → 合并成一份 latest.json →
+  # 建 GitHub Release 并把三者一起上传。应用端的更新端点
+  # (tauri.conf plugins.updater.endpoints) 读的就是 releases/latest/download/latest.json。
+  #
+  # token 优先用 GH_PAT(仓库 Secrets 里配一个有 repo/contents:write 权限的 PAT)。
+  # 本账号的 Actions GITHUB_TOKEN 建 Release 曾返回 "Resource not accessible by
+  # integration",配了 GH_PAT 就绕开;没配则回落 GITHUB_TOKEN 再试一次。
+  # ─────────────────────────────────────────────────────────────
+  publish:
+    name: Publish release + latest.json
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect bundles & build latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          mkdir -p dist
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+
+          # Windows: NSIS 安装包 + 其 .sig(createUpdaterArtifacts=true 时由 tauri 生成)
+          win_exe=$(find artifacts -path '*/nsis/*' -name '*-setup.exe' | head -1)
+          win_sig=$(find artifacts -path '*/nsis/*' -name '*-setup.exe.sig' | head -1)
+          # macOS: 更新走 .app.tar.gz(不是 dmg);dmg 只作为人工下载用
+          mac_tar=$(find artifacts -name '*.app.tar.gz' | head -1)
+          mac_sig=$(find artifacts -name '*.app.tar.gz.sig' | head -1)
+          mac_dmg=$(find artifacts -name '*.dmg' | head -1)
+
+          [ -n "$win_exe" ] && [ -n "$win_sig" ] || { echo "::error::缺 Windows 安装包或其 .sig"; exit 1; }
+          [ -n "$mac_tar" ] && [ -n "$mac_sig" ] || { echo "::error::缺 macOS .app.tar.gz 或其 .sig"; exit 1; }
+
+          cp "$win_exe" "$mac_tar" dist/
+          [ -n "$mac_dmg" ] && cp "$mac_dmg" dist/ || true
+
+          # latest.json:两个平台合进同一份。mac 是 universal 包,两个架构键都指向它。
+          python3 - "$VERSION" "$base" "$(basename "$win_exe")" "$win_sig" \
+                    "$(basename "$mac_tar")" "$mac_sig" <<'PY'
+          import json, sys, datetime, pathlib
+          version, base, win_name, win_sig, mac_name, mac_sig = sys.argv[1:7]
+          win_url = f"{base}/{win_name}"
+          mac_url = f"{base}/{mac_name}"
+          mac_sig_text = pathlib.Path(mac_sig).read_text().strip()
+          entry = {"signature": mac_sig_text, "url": mac_url}
+          out = {
+              "version": version,
+              "notes": f"Polaris · GEO {version}",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc)
+                  .strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": {
+                  "windows-x86_64": {
+                      "signature": pathlib.Path(win_sig).read_text().strip(),
+                      "url": win_url,
+                  },
+                  "darwin-x86_64": entry,
+                  "darwin-aarch64": entry,
+              },
+          }
+          pathlib.Path("dist/latest.json").write_text(
+              json.dumps(out, ensure_ascii=False, indent=2))
+          print(json.dumps(out, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          name: Polaris · GEO ${{ github.ref_name }}
+          prerelease: false
+          # 必须是 latest release,应用端读的是 /releases/latest/download/latest.json
+          make_latest: true
+          files: dist/*

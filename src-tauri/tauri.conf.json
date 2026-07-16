@@ -1,0 +1,74 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "教师助手",
+  "version": "1.0.1",
+  "identifier": "com.polaris.teacher",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://127.0.0.1:1422",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "教师助手",
+        "width": 1500,
+        "height": 960,
+        "minWidth": 960,
+        "minHeight": 600,
+        "center": true,
+        "maximized": true,
+        "decorations": true,
+        "resizable": true,
+        "fullscreen": false,
+        "theme": "Light"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost https://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http: ws: wss: https:; frame-src 'self' data: blob:; object-src 'none'; base-uri 'self'"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://gh-proxy.com/https://github.com/wuli2025/teacher-agent/releases/latest/download/latest.json",
+        "https://github.com/wuli2025/teacher-agent/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzMjVGREVCNjUxMEM4MzUKUldRMXlCQmw2LzBsZzJpaFhFanBZeTc0WjZ1Ull3WGdqVDhiVUNqV0Q0aGgrL2RYYzNRTi9Bb0YK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "resources": [],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "本地优先 AI 教师助手",
+    "longDescription": "教师助手是一个本地优先的 AI 工作台,面向教师备课/答疑/批改,集成 AI 对话、知识库、专家团、课件视频与 PPT 生成。",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "both",
+        "compression": "lzma",
+        "installerIcon": "icons/icon.ico"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "-"
+    }
+  }
+}
