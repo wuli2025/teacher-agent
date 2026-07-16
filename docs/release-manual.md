@@ -11,15 +11,21 @@ Cloudflare Pages。人要做的只有第 1 步和最后的验证。
 
 | 渠道 | 地址 | 谁在用 |
 | --- | --- | --- |
-| 自托管（第一顺位） | `teacher-agent.pages.dev/downloads/` | 国内用户主路径，不看 github 脸色 |
+| 自托管（第一顺位） | R2 桶 `teacher-agent-dist` 的 `downloads/`，公共域 `pub-667c9f15cb424a8db14d7b4ef7bbb481.r2.dev` | 国内用户主路径，不看 github 脸色 |
 | GitHub Releases | `github.com/wuli2025/teacher-agent/releases` | 兜底 + 人工下载 |
 
+**为什么是 R2 不是 Pages**：Pages 单文件上限 25MiB，而本项目装包 win ~119MB / mac ~235MB
+（带了 voice-live 的 sherpa + onnxruntime），差一个数量级。`r2.dev` 是 Cloudflare 给测试用的
+公共域、带限流；命中限流时客户端会自动切下一个源（最坏退回 github 镜像，即没有自托管时的水平），
+故可接受。要更稳可给桶绑自定义域，改 `updater.rs::SELF_HOST_BASE` +
+`tauri.conf.json > endpoints` + `useUpdater.ts > WEB_ENDPOINTS` 三处常量即可。
+
 两条渠道共用**同一份 `latest.json`**（里面的 url 写的是 github 地址）。自托管那一跳由客户端
-`updater.rs::mirror_candidates` 按文件名拼出来，所以 **Pages 挂了客户端会自动回落 github**，
+`updater.rs::mirror_candidates` 按文件名拼出来，所以 **R2 挂了客户端会自动回落 github**，
 不会把自己锁死在单一渠道。客户端完整下载候选链：
 
 ```
-teacher-agent.pages.dev → gh-proxy.com → ghfast.top → 直连 github
+R2(r2.dev) → gh-proxy.com → ghfast.top → 直连 github
 ```
 
 任一源卡死/失败自动切下一个（300s 总超时 + 30s 无字节的停滞看门狗，两道闸门）。
@@ -46,35 +52,50 @@ git push origin v1.0.2      # 触发 release.yml
 
 1. **verify** —— `npm run build` + `cargo test --lib` + `cargo check -p polaris-cli`，不过不放行；
 2. **release** —— Windows(NSIS，含 voice-live) 与 macOS(universal .app/.dmg) 并行构建 + 签名；
-3. **publish** —— 收齐两端产物 → 合并 `latest.json` → 建 GitHub Release(`make_latest`)
-   → 同一批产物部署到 Cloudflare Pages → **回验**自托管 `latest.json` 的版本号对得上。
+3. **publish** —— 收齐两端产物 → **改成 ASCII 名**（见下）→ 合并 `latest.json`
+   → 建 GitHub Release(`make_latest`) → **回验每个下载 url 真的 200**
+   → 同一批产物上传 R2 → **回验**自托管 `latest.json` 版本号 + 装包齐全。
+
+### ⚠ 产物必须是纯 ASCII 文件名
+
+`productName` 是「教师助手」，tauri 出的包名带中文，而 **GitHub 上传 Release 资产时会把非 ASCII
+字符静默剥掉**：`教师助手_1.0.1_x64-setup.exe` → `_1.0.1_x64-setup.exe`。若 `latest.json` 里还写
+原名，客户端**检查更新照常弹窗、一点更新就 404 失败**。v1.0.1 就是这么坏的，而且 **CI 全绿**——
+因为当时只验了 json 格式、没验 url 真能下。
+
+现在 publish job 会把产物改名成 `TeacherAgent_<版本>_x64-setup.exe` / `TeacherAgent.app.tar.gz`
+再上传，并有两道闸：上传前扫非 ASCII 文件名，发布后逐个 `curl -I` 验 200。签名是对**文件字节**
+签的，改名不影响验签。
 
 ## 3. 验证（CI 绿了之后）
 
+CI 已经自动验过了（url 200 + 自托管版本号 + 装包齐全），下面是人工复核：
+
 ```powershell
 # 自托管（客户端第一顺位，最该确认的一个）
-Invoke-RestMethod "https://teacher-agent.pages.dev/downloads/latest.json"
+Invoke-RestMethod "https://pub-667c9f15cb424a8db14d7b4ef7bbb481.r2.dev/downloads/latest.json"
 # GitHub 兜底
 Invoke-RestMethod "https://github.com/wuli2025/teacher-agent/releases/latest/download/latest.json"
 ```
 
 两边都应返回新版 `version` + `windows-x86_64` / `darwin-x86_64` / `darwin-aarch64` 三个平台条目。
 
-> ⚠️ Pages 对未知路径可能返回 **200 的 HTML 回退页**（polaris 站踩过）。本站不放 `index.html`/
-> `_redirects` 就是为了让缺文件时老老实实 404。验证安装包时**别只看状态码**——查首字节魔数
-> （exe = `4d 5a`，tar.gz = `1f 8b`）+ 字节数与本地一致，才能确认是真包而非回退页。
+> ⚠️ **格式对 ≠ 能下**。v1.0.1 的 `latest.json` 完美无缺，三个 url 全 404。验证时一定要真发一次
+> 请求；验安装包内容时别只看状态码——查首字节魔数（exe = `4d 5a`，tar.gz = `1f 8b`）+ 字节数
+> 与本地一致，才能确认是真包而非某个回退页。
 
 ## 4. 自托管没同步上怎么办
 
-CI 里 `cloudflare` 那步需要仓库 Secrets `CLOUDFLARE_API_TOKEN`（Pages:Edit 权限）与
+CI 里上传 R2 那步需要仓库 Secrets `CLOUDFLARE_API_TOKEN`（R2 → Object Read & Write）与
 `CLOUDFLARE_ACCOUNT_ID`。**没配则整步跳过**（只留一条 warning，GitHub 渠道照常可用，
 客户端会回落镜像）。补发用本机已 `wrangler login` 的 OAuth 身份即可，不用 API token：
 
 ```powershell
-pwsh scripts/publish-cloudflare.ps1 -Tag v1.0.2
+pwsh scripts/publish-r2.ps1 -Tag v1.0.2
 ```
 
-它会从 GitHub Release 拉回本版全部资产、校对 `latest.json` 版本号、整站重新部署，最后回验端点。
+它会从 GitHub Release 拉回本版全部资产、校对 `latest.json` 版本号、上传（装包先、latest.json 后，
+避免「已指新版但包还没上去」的空窗），最后回验端点与每个包。
 
 ## Web / Docker 版的"更新"
 

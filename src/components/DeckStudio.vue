@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import { usePolling } from "../composables/usePolling";
 import {
   Presentation,
@@ -22,8 +22,9 @@ import { useChatStore } from "../stores/chat";
 import { artifacts as artifactsApi, chat as chatApi, skills as skillsApi, type AttachedFile, type Skill } from "../tauri";
 import { useFileDrop } from "../composables/useFileDrop";
 import { groupedThemes, findTheme, type DeckTheme } from "../lib/deckThemes";
-import { specViewerHtml, parseSpecLoose, NATIVE_THEME_META } from "../lib/slidesSpec";
+import { parseSpecLoose, NATIVE_THEME_META, type SlideSpec } from "../lib/slidesSpec";
 import { resolveSpecImages } from "../lib/specImages";
+import DeckViewer from "./DeckViewer.vue";
 
 // KeepAlive 的 include 按组件 name 匹配 → 显式命名:切去对话看进度再切回来,
 // phase/convId/产物预览都还在,「继续修改」不丢
@@ -43,21 +44,6 @@ const phase = ref<Phase>("config");
 const error = ref<string | null>(null);
 const convId = ref<string | null>(null);
 const lastAction = ref<"create" | "revise">("create");
-
-// ───────── 播放器页码回传 ─────────
-// 播放器在 sandbox 的不透明源 iframe 里,父组件读不了内部状态;它翻页时 postMessage
-// 回来。轮询重建 srcdoc 时靠这两个值恢复:用户翻过页就钉在原页,没翻过就跟随最新页
-// (生成中逐页点亮的「豆包感」)。
-const savedPage = ref(0);
-const userNavigated = ref(false);
-function onDeckMsg(e: MessageEvent) {
-  const d = e?.data;
-  if (!d || d.type !== "deck-page" || typeof d.page !== "number") return;
-  savedPage.value = d.page;
-  if (d.user) userNavigated.value = true;
-}
-onMounted(() => window.addEventListener("message", onDeckMsg));
-onUnmounted(() => window.removeEventListener("message", onDeckMsg));
 
 // ───────── 配置 ─────────
 const contentText = ref("");
@@ -287,8 +273,6 @@ async function start() {
     }
     lastAction.value = "create";
     phase.value = "generating";
-    savedPage.value = 0;
-    userNavigated.value = false;
     const display = `PPT·${curTheme.value.name}：${preview()}`;
     await chat.send(id, buildPrompt(), display, undefined, {
       permissionMode: "auto_current",
@@ -326,12 +310,11 @@ function reset() {
   convId.value = null;
   outputs.value = [];
   previewHtml.value = "";
+  previewSpec.value = null;
   previewKey.value = "";
   reviseText.value = "";
   specPages.value = 0;
   specTheme.value = "";
-  savedPage.value = 0;
-  userNavigated.value = false;
 }
 
 // ───────── 产物 + 实时预览 ─────────
@@ -346,10 +329,11 @@ const lastToolHint = computed(() => {
 });
 const outputs = ref<{ path: string; name: string; modified: number }[]>([]);
 const hasResult = computed(() => outputs.value.length > 0);
+// 网页模式:自包含 html 喂 iframe。传统PPT模式:解析+内联图后的 spec 对象喂 DeckViewer。
 const previewHtml = ref<string>("");
+const previewSpec = ref<SlideSpec | null>(null);
 const previewPath = ref<string>("");
-// srcdoc 防抖键:只有「内容」(spec 文本/生成态)变了才重建 iframe。翻页会改 savedPage,
-// 若把页码算进键里,每翻一页就重载一次 iframe —— 键里必须只有内容,不含页码。
+// 内容防抖键:spec 文本没变就不重新 解析/内联图(几百KB的图重读一遍不便宜)
 const previewKey = ref<string>("");
 // 宽容解析出的页数(生成中逐页点亮的进度数字) + 当前 spec 主题(换肤高亮用)
 const specPages = ref(0);
@@ -394,33 +378,24 @@ async function loadPreview() {
     }
     return;
   }
-  // 传统PPT(spec 路线):spec → 播放器 HTML,与导出引擎同构(预览即导出)。
+  // 传统PPT(spec 路线):spec → DeckViewer 组件,与导出引擎同构(预览即导出)。
   // 生成中用宽容解析:模型边写边存的「半个 JSON」也能先亮出已完整的页(豆包式逐页点亮),
-  // 不必等整份 spec 合法。
+  // 不必等整份 spec 合法。翻页状态在 DeckViewer 里,这里只管喂最新的 spec 对象。
   const specOut = outputs.value.find((o) => /polaris\.slides\.json$/i.test(o.name));
   if (specOut && isPpt.value) {
     try {
       const p = await artifactsApi.read(specOut.path);
       if (!p?.text) return;
-      const generating = phase.value === "generating";
-      const key = `${specOut.path}|${generating ? "gen" : "done"}|${p.text}`;
-      if (key === previewKey.value) return; // 内容没变:不动 iframe(保住当前页)
+      const key = `${specOut.path}|${p.text}`;
+      if (key === previewKey.value) return; // 内容没变:不重复解析/内联图
       const { spec } = parseSpecLoose(p.text);
       if (!spec || !Array.isArray(spec.slides) || !spec.slides.length) return;
       specPages.value = spec.slides.length;
       specTheme.value = String(spec.theme ?? "");
       await resolveSpecImages(spec);
-      const html = specViewerHtml(spec, {
-        generating,
-        // 用户翻过页就钉在原页;没翻过就跟随最新页(生成中)/回到封面(完成)。
-        initialPage: userNavigated.value ? savedPage.value : 0,
-        follow: generating && !userNavigated.value,
-      });
-      if (html) {
-        previewHtml.value = html;
-        previewPath.value = specOut.path;
-        previewKey.value = key;
-      }
+      previewSpec.value = spec;
+      previewPath.value = specOut.path;
+      previewKey.value = key;
     } catch {
       /* ignore */
     }
@@ -449,8 +424,7 @@ watch(sending, async (now, before) => {
   if (before && !now && phase.value === "generating") {
     await loadOutputs();
     await ensureSpecConverted();
-    phase.value = "done";
-    await loadPreview(); // 生成态→完成态:重建播放器(撤掉「生成中」占位,回封面)
+    phase.value = "done"; // DeckViewer 的 generating prop 随之落下:撤占位、回封面
   }
 });
 
@@ -681,7 +655,7 @@ function fillDemo() {
           </div>
 
           <!-- 生成中、第一页还没落地：轻量等待面板（不再全屏遮罩） -->
-          <div v-else-if="phase === 'generating' && !previewHtml" class="dk-wait">
+          <div v-else-if="phase === 'generating' && !previewHtml && !previewSpec" class="dk-wait">
             <Loader :size="30" class="spin" />
             <span class="dk-wait-t">{{ lastAction === 'revise' ? '正在按修改重做…' : '正在构思大纲与页面…' }}</span>
             <span v-if="lastToolHint" class="dk-tool-hint">{{ lastToolHint }}</span>
@@ -719,10 +693,18 @@ function fillDemo() {
                 <Loader v-if="skinning" :size="12" class="spin" />
               </div>
             </div>
-            <!-- 安全: 只给 allow-scripts(播放器/deck runtime 需要), 绝不加 allow-same-origin ——
-                 二者并存会让 srcdoc 内 AI 生成的脚本自拆沙箱、同源访问 __TAURI_INTERNALS__ 调后端。
-                 播放器在不透明源里照常翻页(只操作自身 document + postMessage 页码给父窗口)。 -->
-            <iframe v-if="previewHtml" class="dk-frame" :srcdoc="previewHtml" sandbox="allow-scripts"></iframe>
+            <!-- 传统PPT:组件播放器(缩略图+舞台+翻页,与导出同构;不走 iframe——
+                 Tauri CSP 会拦 srcdoc 内联脚本,组件方案由 Vue 管状态,天然免疫) -->
+            <DeckViewer
+              v-if="isPpt && previewSpec"
+              class="dk-viewer"
+              :spec="previewSpec"
+              :generating="phase === 'generating'"
+            />
+            <!-- 网页PPT:自包含 html 喂 iframe。安全: 只给 allow-scripts,绝不加
+                 allow-same-origin —— 二者并存会让 srcdoc 内 AI 生成的脚本自拆沙箱、
+                 同源访问 __TAURI_INTERNALS__ 调后端。 -->
+            <iframe v-else-if="previewHtml" class="dk-frame" :srcdoc="previewHtml" sandbox="allow-scripts"></iframe>
             <div v-else class="dk-frame-empty">
               <Monitor :size="30" />
               <span>{{ phase === 'generating' ? '预览加载中…可在对话或目录查看' : '预览没有加载出来' }}</span>
@@ -840,7 +822,8 @@ function fillDemo() {
 
 /* 预览态 */
 .dk-preview { flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
-.dk-frame { flex: 1; width: 100%; border: 1px solid var(--border); border-radius: 10px; background: #26262b; box-shadow: var(--shadow, 0 6px 24px rgba(0,0,0,.08)); }
+.dk-viewer { flex: 1; min-height: 0; border: 1px solid var(--border); box-shadow: var(--shadow, 0 6px 24px rgba(0,0,0,.08)); }
+.dk-frame { flex: 1; width: 100%; border: 1px solid var(--border); border-radius: 10px; background: #fff; box-shadow: var(--shadow, 0 6px 24px rgba(0,0,0,.08)); }
 .dk-frame-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); border: 1px dashed var(--border); border-radius: 10px; }
 .dk-preview-tip { font-size: 12px; color: var(--muted); text-align: center; }
 

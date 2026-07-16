@@ -229,13 +229,21 @@ async fn run_check(app: &AppHandle) -> UpdaterState {
 /// download() 内部对字节做 minisign 验签——某源若被劫持/返回错误页，签名必不过 → 自动跳到下一个源，
 /// 故候选顺序安全，最坏退化到直连。非 github 源不套前缀、直连。
 ///
-/// **自托管排第一**：`teacher-agent.pages.dev/downloads/<文件名>` 是发版时传上去的同一批包
-/// （见 docs/release-manual.md 与 release.yml 的 cloudflare job），Cloudflare 边缘国内可达性最好、
-/// 不受 github 抽风影响。装包很小(win ~6MB / mac ~14MB)，Pages 扛得住、无需 R2。
-/// 后三个 github 系候选是自托管挂掉时的兜底。
+/// **自托管排第一**：`SELF_HOST_BASE/<文件名>` 是发版时传上去的同一批包
+/// （见 docs/release-manual.md 与 release.yml 的 R2 上传步骤），Cloudflare 边缘国内可达性最好、
+/// 不受 github 抽风影响。
+///
+/// 用 R2 而非 Pages：Pages 单文件上限 25MiB，而本项目装包 win ~119MB / mac ~235MB
+/// （带了 voice-live 的 sherpa + onnxruntime），差一个数量级，Pages 根本传不上去。
+///
+/// r2.dev 是 Cloudflare 给测试用的公共域、带限流，但**限流命中时客户端会自动切下一个源**
+/// （最坏退回 github 镜像，即没有自托管时的水平），故可接受；要更稳可给桶绑自定义域，
+/// 只需改下面这个常量。
 ///
 /// latest.json 里的 url 始终写 github 地址（两个分发渠道共用同一份 latest.json），
-/// 自托管这一跳由这里按文件名拼出来、而非写死进 latest.json——这样 Pages 掉线仍能回落 github。
+/// 自托管这一跳由这里按文件名拼出来、而非写死进 latest.json——这样 R2 掉线仍能回落 github。
+const SELF_HOST_BASE: &str = "https://pub-667c9f15cb424a8db14d7b4ef7bbb481.r2.dev/downloads";
+
 fn mirror_candidates(url: &str) -> Vec<String> {
     // latest.json 里的 url 可能本身已是 `https://<镜像>/https://github.com/...`，
     // 取最后一段裸地址，避免把镜像套娃。
@@ -246,7 +254,7 @@ fn mirror_candidates(url: &str) -> Vec<String> {
     let filename = bare.rsplit('/').next().unwrap_or("");
     let mut out = Vec::new();
     if !filename.is_empty() {
-        out.push(format!("https://teacher-agent.pages.dev/downloads/{filename}"));
+        out.push(format!("{SELF_HOST_BASE}/{filename}"));
     }
     out.push(format!("https://gh-proxy.com/{bare}"));
     out.push(format!("https://ghfast.top/{bare}"));
@@ -538,21 +546,21 @@ mod tests {
     #[test]
     fn mirror_candidates_wraps_bare_github_url() {
         let c = mirror_candidates(
-            "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.1/教师助手_1.0.1_x64-setup.exe",
+            "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.2/TeacherAgent_1.0.2_x64-setup.exe",
         );
         // 自托管 / gh-proxy / ghfast / 直连 共 4 个候选源。
         assert_eq!(c.len(), 4);
         // 自托管排第一（国内可达性最好），按文件名取。
         assert_eq!(
             c[0],
-            "https://teacher-agent.pages.dev/downloads/教师助手_1.0.1_x64-setup.exe"
+            format!("{SELF_HOST_BASE}/TeacherAgent_1.0.2_x64-setup.exe")
         );
         assert!(c[1].starts_with("https://gh-proxy.com/https://github.com/"));
         assert!(c[2].starts_with("https://ghfast.top/https://github.com/"));
         // 末位是直连兜底（无镜像前缀）。
         assert_eq!(
             c[3],
-            "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.1/教师助手_1.0.1_x64-setup.exe"
+            "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.2/TeacherAgent_1.0.2_x64-setup.exe"
         );
     }
 
@@ -560,17 +568,14 @@ mod tests {
     fn mirror_candidates_unwraps_already_mirrored_url() {
         // latest.json 里若已写成镜像 url，不能套娃，要剥回裸地址再重套。
         let c = mirror_candidates(
-            "https://gh-proxy.com/https://github.com/wuli2025/teacher-agent/releases/download/v1.0.1/教师助手.app.tar.gz",
+            "https://gh-proxy.com/https://github.com/wuli2025/teacher-agent/releases/download/v1.0.2/TeacherAgent.app.tar.gz",
         );
         assert_eq!(c.len(), 4);
         // 自托管（首位）按文件名，不带版本路径前缀。
-        assert_eq!(
-            c[0],
-            "https://teacher-agent.pages.dev/downloads/教师助手.app.tar.gz"
-        );
+        assert_eq!(c[0], format!("{SELF_HOST_BASE}/TeacherAgent.app.tar.gz"));
         assert_eq!(
             c[3],
-            "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.1/教师助手.app.tar.gz"
+            "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.2/TeacherAgent.app.tar.gz"
         );
         // 不出现双重镜像前缀。
         assert!(!c[1].contains("gh-proxy.com/https://gh-proxy.com"));
@@ -579,10 +584,10 @@ mod tests {
     #[test]
     fn mirror_candidates_passthrough_non_github() {
         // 非 github 源（如 latest.json 直接给了自托管地址）直连、不套镜像。
-        let c = mirror_candidates("https://teacher-agent.pages.dev/v1.0.1/setup.exe");
+        let c = mirror_candidates("https://example.invalid/v1.0.2/setup.exe");
         assert_eq!(
             c,
-            vec!["https://teacher-agent.pages.dev/v1.0.1/setup.exe".to_string()]
+            vec!["https://example.invalid/v1.0.2/setup.exe".to_string()]
         );
     }
 

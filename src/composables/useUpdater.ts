@@ -109,7 +109,8 @@ function isNewer(a: string, b: string): boolean {
  * 最坏后果是显示一个错的版本号；真正要验签的是桌面端的下载安装那一跳（updater.rs）。
  */
 const WEB_ENDPOINTS = [
-  "https://teacher-agent.pages.dev/downloads/latest.json",
+  // 与 tauri.conf.json > plugins.updater.endpoints 保持同一顺序、同一批地址。
+  "https://pub-667c9f15cb424a8db14d7b4ef7bbb481.r2.dev/downloads/latest.json",
   "https://gh-proxy.com/https://github.com/wuli2025/teacher-agent/releases/latest/download/latest.json",
   "https://github.com/wuli2025/teacher-agent/releases/latest/download/latest.json",
 ];

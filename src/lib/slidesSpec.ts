@@ -727,6 +727,22 @@ export function specPreviewHtml(spec: SlideSpec | string): string | null {
   </style></head><body>${slides}</body></html>`;
 }
 
+/**
+ * 逐页渲染(DeckViewer.vue 组件用):每页一段 <section class="sl">…</section> + 色板 CSS。
+ * 之所以不用 specViewerHtml 的 iframe 方案:Tauri 主文档的 CSP 会被 srcdoc iframe
+ * 继承,内联 <script> 一律被拦 —— 播放器 runtime 根本跑不起来。组件方案由 Vue 管
+ * 状态,页面 HTML 走 v-html(内容全部经 esc() 转义,安全由构造保证),彻底绕开 CSP。
+ */
+export function specSlidesRender(
+  spec: SlideSpec | string
+): { pages: string[]; css: string; theme: string } | null {
+  const s = coerceSpec(spec);
+  if (!s) return null;
+  const theme = PALETTES[s.theme ?? ""] ? (s.theme as string) : "minimal-white";
+  const pal = PALETTES[theme];
+  return { pages: s.slides.map((sl) => slideHtml(sl, pal)), css: slideBaseCss(pal), theme };
+}
+
 export interface DeckViewerOpts {
   /** 生成中:缩略图栏尾部加脉动占位「下一页生成中」。 */
   generating?: boolean;
@@ -734,6 +750,9 @@ export interface DeckViewerOpts {
   initialPage?: number;
   /** true=跳到最新一页(生成中逐页点亮的跟随感);false/缺省=停在 initialPage。 */
   follow?: boolean;
+  /** postMessage 回传时带上的通道名 —— 工坊与右抽屉可能同屏各挂一个播放器,
+   *  父窗口靠它分流页码,不然互相覆盖。缺省 ""。 */
+  channel?: string;
 }
 
 /**
@@ -754,6 +773,7 @@ export function specViewerHtml(spec: SlideSpec | string, opts: DeckViewerOpts = 
     page: Math.max(0, Math.min(opts.initialPage ?? 0, n - 1)),
     follow: opts.follow === true,
     generating: opts.generating === true,
+    channel: String(opts.channel ?? ""),
   }).replace(/</g, "\\u003c");
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
   *{box-sizing:border-box;margin:0}
@@ -827,7 +847,7 @@ export function specViewerHtml(spec: SlideSpec | string, opts: DeckViewerOpts = 
       num.textContent=(page+1)+" / "+slides.length;
       prev.disabled=page<=0;next.disabled=page>=slides.length-1;
       var th=thumbs[page];if(th&&th.scrollIntoView)th.scrollIntoView({block:"nearest"});
-      try{parent.postMessage({type:"deck-page",page:page,user:!!user},"*");}catch(e){}
+      try{parent.postMessage({type:"deck-page",channel:CFG.channel,page:page,user:!!user},"*");}catch(e){}
     }
     prev.addEventListener("click",function(){go(page-1,true);});
     next.addEventListener("click",function(){go(page+1,true);});

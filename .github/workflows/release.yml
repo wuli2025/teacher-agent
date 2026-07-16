@@ -174,12 +174,28 @@ jobs:
           [ -n "$win_exe" ] && [ -n "$win_sig" ] || { echo "::error::缺 Windows 安装包或其 .sig"; exit 1; }
           [ -n "$mac_tar" ] && [ -n "$mac_sig" ] || { echo "::error::缺 macOS .app.tar.gz 或其 .sig"; exit 1; }
 
-          cp "$win_exe" "$mac_tar" dist/
-          [ -n "$mac_dmg" ] && cp "$mac_dmg" dist/ || true
+          # ⚠ 产物必须改成纯 ASCII 名再上传：productName 是「教师助手」,tauri 出的包名带中文,
+          # 而 GitHub 上传 Release 资产时会把非 ASCII 字符**静默剥掉**
+          # (教师助手_1.0.1_x64-setup.exe → _1.0.1_x64-setup.exe)。
+          # latest.json 里若还写原名 → 客户端下载必 404:检查更新照常弹窗,一点更新就失败。
+          # v1.0.1 就是这么坏的(CI 全绿)。签名是对**文件字节**签的,改名不影响验签。
+          win_dest="TeacherAgent_${VERSION}_x64-setup.exe"
+          mac_dest="TeacherAgent.app.tar.gz"
+          cp "$win_exe" "dist/$win_dest"
+          cp "$mac_tar" "dist/$mac_dest"
+          [ -n "$mac_dmg" ] && cp "$mac_dmg" "dist/TeacherAgent_${VERSION}_universal.dmg" || true
+
+          # 上传前自查:dist 里不许再有非 ASCII 文件名,否则又会被 GitHub 悄悄改名。
+          for f in dist/*; do
+            case "$(basename "$f")" in
+              *[!\ -~]*) echo "::error::产物名含非 ASCII 字符,上传后会被 GitHub 剥掉: $f"; exit 1 ;;
+            esac
+          done
 
           # latest.json:两个平台合进同一份。mac 是 universal 包,两个架构键都指向它。
-          python3 - "$VERSION" "$base" "$(basename "$win_exe")" "$win_sig" \
-                    "$(basename "$mac_tar")" "$mac_sig" <<'PY'
+          # 传的是**改名后**的文件名,与实际上传的资产名严格一致。
+          python3 - "$VERSION" "$base" "$win_dest" "$win_sig" \
+                    "$mac_dest" "$mac_sig" <<'PY'
           import json, sys, datetime, pathlib
           version, base, win_name, win_sig, mac_name, mac_sig = sys.argv[1:7]
           win_url = f"{base}/{win_name}"
@@ -216,54 +232,78 @@ jobs:
           make_latest: true
           files: dist/*
 
-      # ── 自托管分发（Cloudflare Pages）──────────────────────────
-      # 客户端 endpoints 第一顺位是 teacher-agent.pages.dev/downloads/latest.json,
+      # latest.json 里的 url 必须真能下到东西。v1.0.1 栽在这:CI 全绿、Release 建好、
+      # latest.json 格式完美,但 url 写的是被 GitHub 剥掉中文前的原名 → 全部 404,
+      # 自动更新对所有用户静默失效。格式对 ≠ 能下,这里按真实 HTTP 结果卡。
+      - name: Verify download urls resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          urls=$(python3 -c 'import json;d=json.load(open("dist/latest.json"));[print(p["url"]) for p in d["platforms"].values()]' | sort -u)
+          fail=0
+          for u in $urls; do
+            # -L 跟随 GitHub 的 302 到实际存储;-I 只取头,不拉 100MB+ 的包。
+            code=$(curl -sIL -o /dev/null -w '%{http_code}' "$u" || echo 000)
+            if [ "$code" = "200" ]; then echo "✓ $code $u"; else echo "✗ $code $u"; fail=1; fi
+          done
+          [ "$fail" = "0" ] || { echo "::error::latest.json 里有下载地址不可达,自动更新会失效"; exit 1; }
+
+      # ── 自托管分发（Cloudflare R2）─────────────────────────────
+      # 客户端 endpoints 第一顺位是 R2 上的 downloads/latest.json,
       # updater.rs::mirror_candidates 下载安装包时也优先走这里(国内可达性最好、不看 github 脸色)。
       # 所以这一步必须与 GitHub Release 同版本同步,否则自托管源会一直供旧包。
       #
-      # 两个渠道共用同一份 latest.json(里面的 url 指向 github),自托管那一跳由客户端按文件名拼,
-      # 因此 Pages 掉线时客户端仍能自动回落 github,不会把自己锁死在单一渠道。
+      # 用 R2 而非 Pages:Pages 单文件上限 25MiB,本项目装包 win ~119MB / mac ~235MB,差一个数量级。
       #
-      # 需在仓库 Secrets 配 CLOUDFLARE_API_TOKEN(Pages:Edit 权限) 与 CLOUDFLARE_ACCOUNT_ID。
+      # 两个渠道共用同一份 latest.json(里面的 url 指向 github),自托管那一跳由客户端按文件名拼,
+      # 因此 R2 掉线/限流时客户端仍能自动回落 github,不会把自己锁死在单一渠道。
+      #
+      # 需在仓库 Secrets 配 CLOUDFLARE_API_TOKEN(Object Read & Write) 与 CLOUDFLARE_ACCOUNT_ID。
       # 没配则跳过(GitHub 渠道照常可用),不让发版整体失败。
-      - name: Stage Cloudflare site
-        id: cf_stage
+      - name: Upload to Cloudflare R2
+        id: r2
         shell: bash
         env:
-          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          if [ -z "${CF_TOKEN:-}" ]; then
-            echo "::warning::未配 CLOUDFLARE_API_TOKEN,跳过自托管分发(客户端会回落 github 镜像)"
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::warning::未配 CLOUDFLARE_API_TOKEN/ACCOUNT_ID,跳过自托管分发(客户端会回落 github 镜像)。补发见 scripts/publish-r2.ps1"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          mkdir -p site/downloads
-          cp dist/* site/downloads/
-          # 不放 index.html / _redirects:Pages 对未知路径直接 404,
-          # 避免「latest.json 缺失却返回 200 的 HTML」把客户端喂成解析错误(polaris 站踩过)。
+          # latest.json 最后传:装包先就位,避免「latest.json 已指新版、包还没上去」的空窗期。
+          for f in $(ls dist | grep -v '^latest.json$'); do
+            echo "→ $f"
+            npx --yes wrangler@4 r2 object put "teacher-agent-dist/downloads/$f" \
+              --file "dist/$f" --remote
+          done
+          npx --yes wrangler@4 r2 object put "teacher-agent-dist/downloads/latest.json" \
+            --file dist/latest.json --content-type application/json --remote
           echo "skip=false" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy to Cloudflare Pages
-        if: steps.cf_stage.outputs.skip == 'false'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy site --project-name teacher-agent --branch main --commit-dirty=true
 
       # 自托管源是第一顺位,必须实测拿到的是 JSON 且版本号对得上,而不是只看 HTTP 200。
       - name: Verify self-hosted endpoint
-        if: steps.cf_stage.outputs.skip == 'false'
+        if: steps.r2.outputs.skip == 'false'
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
+          BASE="https://pub-667c9f15cb424a8db14d7b4ef7bbb481.r2.dev/downloads"
           for i in 1 2 3 4 5; do
-            got=$(curl -fsSL https://teacher-agent.pages.dev/downloads/latest.json | python3 -c \
+            got=$(curl -fsSL "$BASE/latest.json" | python3 -c \
               'import sys,json; print(json.load(sys.stdin)["version"])' 2>/dev/null) || got=""
-            if [ "$got" = "$VERSION" ]; then echo "自托管 latest.json 已就绪: $got"; exit 0; fi
-            echo "第 $i 次:拿到 '$got',期望 '$VERSION',10s 后重试(Pages 边缘生效有延迟)"
+            if [ "$got" = "$VERSION" ]; then
+              echo "自托管 latest.json 已就绪: $got"
+              # 装包也得真在:客户端第一顺位就是从这里拉包,404 会白耗一次重试。
+              for f in $(ls dist | grep -v '^latest.json$'); do
+                code=$(curl -sI -o /dev/null -w '%{http_code}' "$BASE/$f" || echo 000)
+                [ "$code" = "200" ] && echo "✓ $code $f" || { echo "::error::自托管缺包: $code $f"; exit 1; }
+              done
+              exit 0
+            fi
+            echo "第 $i 次:拿到 '$got',期望 '$VERSION',10s 后重试(边缘生效有延迟)"
             sleep 10
           done
           echo "::error::自托管 latest.json 未同步到 $VERSION"

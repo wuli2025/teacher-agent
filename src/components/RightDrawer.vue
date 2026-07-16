@@ -2,8 +2,10 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, defineAsyncComponent } from "vue";
 import { marked } from "marked";
 import { sanitizeHtml } from "../lib/sanitize";
-import { specViewerHtml, parseSpecLoose } from "../lib/slidesSpec";
+import { parseSpecLoose } from "../lib/slidesSpec";
 import { resolveSpecImages } from "../lib/specImages";
+import { usePolling } from "../composables/usePolling";
+import DeckViewer from "./DeckViewer.vue";
 import {
   X,
   RefreshCw,
@@ -294,45 +296,99 @@ function editPptx() {
   }
 }
 
-// ── 演示 spec / 原生 pptx → 豆包式播放器预览 ──
+// ── 演示 spec / 原生 pptx → 豆包式播放器预览(DeckViewer 组件) ──
 // 对话里(演示工坊之外)模型也会产 polaris.slides.json:它 kind=text,原来只能看生 JSON;
-// 原生 spec 导出的 .pptx 是 binary,原来只有「暂不支持预览」。两者都改走 specViewerHtml
-// —— 与演示工坊同一个确定性渲染器,预览即导出。
-const deckHtml = ref<string>("");
+// 原生 spec 导出的 .pptx 是 binary,原来只有「暂不支持预览」。两者都改走 DeckViewer
+// —— 与演示工坊同一个确定性渲染器,预览即导出。(不用 srcdoc iframe:Tauri CSP 会拦
+// 它的内联脚本,播放器 runtime 跑不起来 —— 排查过,壳在页全空。)
+// 生成中(chat 正在发送)每 3s 直接重读 spec 文件:配合宽容解析,模型边写页边点亮,
+// 这是「一句话生成课件」主链路的豆包式实时感。不用 artifacts.refresh() —— 那会把
+// loading 置真,整个预览区每 3s 闪一次加载态。
+const deckSpec = ref<any | null>(null);
 const deckSpecPath = ref<string | null>(null);
+const deckKey = ref<string>("");
+const deckPages = ref(0);
+const deckGenerating = computed(() => chat.isSending(app.currentConvId ?? null));
+// 生成中且还没有可渲染的页:用等待态盖住 loading/error(spec 未落盘时 read 必然报错)
+const deckPending = computed(
+  () => deckGenerating.value && !!deckCandidatePath.value && !deckSpec.value
+);
+
+/** spec 文本 → 解析+内联图 → 喂 DeckViewer。内容没变(key 相同)就不重复解析。 */
+async function buildDeck(specText: string, specPath: string, expectPayload: unknown) {
+  const key = `${specPath}|${specText}`;
+  if (key === deckKey.value) return;
+  const { spec } = parseSpecLoose(specText);
+  if (!spec || !Array.isArray(spec.slides) || !spec.slides.length) return;
+  await resolveSpecImages(spec);
+  if (artifacts.payload !== expectPayload) return; // 竞态:内联图期间已切走
+  deckSpec.value = spec;
+  deckSpecPath.value = specPath;
+  deckKey.value = key;
+  deckPages.value = spec.slides.length;
+}
+
 watch(
   [() => artifacts.payload, pptxSiblingSpec],
   async ([p, sib]) => {
-    deckHtml.value = "";
+    deckSpec.value = null;
     deckSpecPath.value = null;
+    deckKey.value = "";
+    deckPages.value = 0;
     if (!p) return;
-    let specText: string | null = null;
-    let specPath: string | null = null;
     if (/^polaris\.slides\.json$/i.test(p.name) && p.text) {
-      specText = p.text;
-      specPath = p.path;
+      await buildDeck(p.text, p.path, p);
     } else if (/\.pptx$/i.test(p.name) && sib) {
       try {
         const r = await artifactsApi.read(sib);
         if (artifacts.payload !== p) return; // 竞态:读盘期间已切走
-        specText = r?.text ?? null;
-        specPath = sib;
+        if (r?.text) await buildDeck(r.text, sib, p);
       } catch {
-        return;
+        /* 读不到就维持原分支(binary 提示) */
       }
-    }
-    if (!specText || !specPath) return;
-    const { spec } = parseSpecLoose(specText);
-    if (!spec || !Array.isArray(spec.slides) || !spec.slides.length) return;
-    await resolveSpecImages(spec);
-    if (artifacts.payload !== p) return; // 竞态:内联图期间已切走
-    const html = specViewerHtml(spec);
-    if (html) {
-      deckHtml.value = html;
-      deckSpecPath.value = specPath;
     }
   },
   { immediate: true }
+);
+
+// 候选 spec 路径:当前正看的就是 spec,或正看的 pptx 有伴生 spec。
+// 用 current(用户意图)而不用 payload:后端的 artifact 事件可能先于文件真正落盘,
+// 自动打开时 read 失败 → payload 是 null、error 挂着 —— 若轮询门要求 payload 非空,
+// 文件稍后落盘也没人再去读,抽屉就死在「文件不存在」上了。
+const deckCandidatePath = computed<string | null>(() => {
+  const cur = artifacts.current;
+  if (!cur) return null;
+  if (/^polaris\.slides\.json$/i.test(cur.name)) return cur.path;
+  if (/\.pptx$/i.test(cur.name) && pptxSiblingSpec.value) return pptxSiblingSpec.value;
+  return null;
+});
+// 生成中轮询重读 spec(逐页点亮);生成结束再读最后一次(撤占位、回封面)
+async function pollDeckSpec() {
+  const sp = deckCandidatePath.value;
+  if (!sp) return;
+  // 早开晚落盘的恢复:抽屉停在错误态(payload 空)时,重开一次 —— 文件已落盘就能翻身
+  if (!artifacts.payload) {
+    if (artifacts.error && !artifacts.loading) await artifacts.refresh();
+    return; // payload 就位后由 watch 正常构建
+  }
+  const p = artifacts.payload;
+  try {
+    const r = await artifactsApi.read(sp);
+    if (r?.text && artifacts.payload === p) await buildDeck(r.text, sp, p);
+  } catch {
+    /* 下次轮询再试 */
+  }
+}
+const deckPoller = usePolling(pollDeckSpec, 3000);
+watch(
+  () => deckGenerating.value && !!deckCandidatePath.value,
+  (on, was) => {
+    if (on) deckPoller.start();
+    else {
+      deckPoller.stop();
+      if (was) void pollDeckSpec(); // 下降沿补一拍:重建成「完成态」播放器
+    }
+  }
 );
 const deckExporting = ref(false);
 const deckError = ref<string | null>(null);
@@ -539,7 +595,15 @@ function fmtSize(n: number): string {
       </div>
 
       <div class="pv-body">
-        <div v-if="artifacts.loading" class="pv-state">
+        <!-- 课件生成中、spec 还没落盘:后端的 artifact 事件在模型「叙述路径」时就触发,
+             比真正写盘早一两分钟。这段窗口必须给等待态 —— 否则用户盯着的是一句刺眼的
+             「文件不存在或无法访问」(那是真相,但不是此刻该说的话)。轮询会在文件落盘的
+             那一刻自动接上,无需用户操作。必须排在 loading/error 分支前把它们盖住。 -->
+        <div v-if="deckPending" class="pv-state">
+          <Loader :size="22" :stroke-width="1.6" class="spin" />
+          <span>课件生成中…第一页出来就会显示</span>
+        </div>
+        <div v-else-if="artifacts.loading" class="pv-state">
           <Loader :size="22" :stroke-width="1.6" class="spin" />
           <span>正在加载…</span>
         </div>
@@ -554,23 +618,25 @@ function fmtSize(n: number): string {
         <template v-else-if="artifacts.payload">
           <!-- 演示 spec / 原生 pptx → 豆包式播放器(与演示工坊同一渲染器,预览即导出)。
                必须排在 text/binary 分支前:spec 是 kind=text、原生 pptx 是 kind=binary。 -->
-          <div v-if="deckHtml" class="pv-deck">
+          <div v-if="deckSpec" class="pv-deck">
             <div v-if="deckError" class="pv-deck-err">{{ deckError }}</div>
             <div class="pv-deck-bar">
-              <button class="pv-deck-export" :disabled="deckExporting" @click="exportDeckPptx()">
+              <button
+                class="pv-deck-export"
+                :disabled="deckExporting || deckGenerating"
+                :title="deckGenerating ? '生成完成后可导出' : '无条件重转并在文件夹中定位'"
+                @click="exportDeckPptx()"
+              >
                 <Loader v-if="deckExporting" :size="13" :stroke-width="1.8" class="spin" />
                 <Download v-else :size="13" :stroke-width="1.8" />
                 <span>{{ deckExporting ? "导出中…" : "导出 PPTX" }}</span>
               </button>
-              <span class="pv-deck-hint">原生可编辑 · 预览即导出</span>
+              <span v-if="deckGenerating" class="pv-deck-live">
+                <Loader :size="12" :stroke-width="1.8" class="spin" /> 生成中 · 已出 {{ deckPages }} 页
+              </span>
+              <span v-else class="pv-deck-hint">原生可编辑 · 预览即导出</span>
             </div>
-            <iframe
-              :key="'deck:' + artifacts.payload.path"
-              class="pv-frame"
-              :srcdoc="deckHtml"
-              sandbox="allow-scripts"
-              referrerpolicy="no-referrer"
-            />
+            <DeckViewer class="pv-deck-viewer" :spec="deckSpec" :generating="deckGenerating" />
           </div>
           <!-- HTML / SVG → iframe 完整渲染 -->
           <iframe
@@ -952,15 +1018,17 @@ function fmtSize(n: number): string {
   border: none;
   background: #fff;
 }
-/* 演示播放器包壳:顶部导出条 + iframe(播放器自带深底) */
+/* 演示播放器包壳:顶部导出条 + DeckViewer(自带深底) */
 .pv-deck {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-.pv-deck .pv-frame {
-  background: #26262b;
+.pv-deck-viewer {
+  flex: 1;
+  min-height: 0;
+  border-radius: 0;
 }
 .pv-deck-bar {
   display: flex;
@@ -993,6 +1061,14 @@ function fmtSize(n: number): string {
 .pv-deck-hint {
   font-size: 11px;
   color: var(--muted);
+}
+.pv-deck-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--primary-deep, var(--primary));
 }
 .pv-deck-err {
   padding: 6px 10px;
