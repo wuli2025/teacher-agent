@@ -62,6 +62,26 @@ export function backendFileUrl(
   return `/api/file?${qs.toString()}`;
 }
 
+/**
+ * 服务端自身版本（Docker/Web 用；桌面端走 tauri updater，不需要它）。
+ * 拿不到（纯前端预览 / 未登录 / 旧版服务端没这个路由）一律返回 null，由调用方静默降级。
+ */
+export async function backendVersion(): Promise<string | null> {
+  try {
+    const r = await fetch("/api/version", {
+      cache: "no-store",
+      headers: authHeaders(),
+    });
+    if (!r.ok) return null;
+    // vite dev / SPA 回退可能把未知路由兜底成 index.html(200)，只认真 JSON。
+    if (!(r.headers.get("content-type") || "").includes("application/json")) return null;
+    const j = (await r.json()) as { version?: string };
+    return j.version || null;
+  } catch {
+    return null;
+  }
+}
+
 /** stub 判定不终身缓存：页面加载瞬间后端恰在重启时，一次探测失败曾把整个应用
  *  永久钉死在「浏览器预览」假数据模式（invoke 全走 stub、listen 全空），只能刷新自救。
  *  超过 TTL 后允许重探，后端恢复即自动切回 http。 */

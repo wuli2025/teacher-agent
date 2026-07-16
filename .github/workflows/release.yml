@@ -188,7 +188,7 @@ jobs:
           entry = {"signature": mac_sig_text, "url": mac_url}
           out = {
               "version": version,
-              "notes": f"Polaris · GEO {version}",
+              "notes": f"教师助手 {version}",
               "pub_date": datetime.datetime.now(datetime.timezone.utc)
                   .strftime("%Y-%m-%dT%H:%M:%SZ"),
               "platforms": {
@@ -210,8 +210,61 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
-          name: Polaris · GEO ${{ github.ref_name }}
+          name: 教师助手 ${{ github.ref_name }}
           prerelease: false
           # 必须是 latest release,应用端读的是 /releases/latest/download/latest.json
           make_latest: true
           files: dist/*
+
+      # ── 自托管分发（Cloudflare Pages）──────────────────────────
+      # 客户端 endpoints 第一顺位是 teacher-agent.pages.dev/downloads/latest.json,
+      # updater.rs::mirror_candidates 下载安装包时也优先走这里(国内可达性最好、不看 github 脸色)。
+      # 所以这一步必须与 GitHub Release 同版本同步,否则自托管源会一直供旧包。
+      #
+      # 两个渠道共用同一份 latest.json(里面的 url 指向 github),自托管那一跳由客户端按文件名拼,
+      # 因此 Pages 掉线时客户端仍能自动回落 github,不会把自己锁死在单一渠道。
+      #
+      # 需在仓库 Secrets 配 CLOUDFLARE_API_TOKEN(Pages:Edit 权限) 与 CLOUDFLARE_ACCOUNT_ID。
+      # 没配则跳过(GitHub 渠道照常可用),不让发版整体失败。
+      - name: Stage Cloudflare site
+        id: cf_stage
+        shell: bash
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CF_TOKEN:-}" ]; then
+            echo "::warning::未配 CLOUDFLARE_API_TOKEN,跳过自托管分发(客户端会回落 github 镜像)"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p site/downloads
+          cp dist/* site/downloads/
+          # 不放 index.html / _redirects:Pages 对未知路径直接 404,
+          # 避免「latest.json 缺失却返回 200 的 HTML」把客户端喂成解析错误(polaris 站踩过)。
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloudflare Pages
+        if: steps.cf_stage.outputs.skip == 'false'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name teacher-agent --branch main --commit-dirty=true
+
+      # 自托管源是第一顺位,必须实测拿到的是 JSON 且版本号对得上,而不是只看 HTTP 200。
+      - name: Verify self-hosted endpoint
+        if: steps.cf_stage.outputs.skip == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          for i in 1 2 3 4 5; do
+            got=$(curl -fsSL https://teacher-agent.pages.dev/downloads/latest.json | python3 -c \
+              'import sys,json; print(json.load(sys.stdin)["version"])' 2>/dev/null) || got=""
+            if [ "$got" = "$VERSION" ]; then echo "自托管 latest.json 已就绪: $got"; exit 0; fi
+            echo "第 $i 次:拿到 '$got',期望 '$VERSION',10s 后重试(Pages 边缘生效有延迟)"
+            sleep 10
+          done
+          echo "::error::自托管 latest.json 未同步到 $VERSION"
+          exit 1

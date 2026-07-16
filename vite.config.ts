@@ -1,5 +1,11 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
+import { createRequire } from "node:module";
+
+// 打包进前端的版本号 = package.json 的版本（与 tauri.conf.json 的 version 同步维护，
+// 见 docs/release-manual.md 的「版本号四处同步」）。Web/Docker 版靠它判断
+// 「浏览器里跑的这份 SPA」是不是比服务端旧（缓存了老 index.html）→ 提示刷新。
+const pkgVersion = createRequire(import.meta.url)("./package.json").version;
 
 // Tauri devUrl 固定指向 1422（教师助手专用端口，避开 polaris-app 的 1421，两项目可并存）。
 // 端口被占用时必须直接报错；若让 Vite 自动漂到别的端口，Tauri 仍会打开 1422，
@@ -7,6 +13,9 @@ import vue from "@vitejs/plugin-vue";
 export default defineConfig({
   plugins: [vue()],
   clearScreen: false,
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+  },
   server: {
     port: 1422,
     strictPort: true,

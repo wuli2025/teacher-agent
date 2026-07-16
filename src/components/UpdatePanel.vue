@@ -25,6 +25,8 @@ import {
   lastCheckedAt,
   manualCheck,
   applyUpdate,
+  webAction,
+  webUpgradeHint,
 } from "../composables/useUpdater";
 
 onMounted(async () => {
@@ -32,7 +34,7 @@ onMounted(async () => {
     try {
       currentVersion.value = await getVersion();
     } catch {
-      /* 浏览器预览态拿不到版本，忽略 */
+      /* 浏览器预览态拿不到版本；Web 版的版本号由 useUpdater 的 webCheck 从 /api/version 补 */
     }
   }
 });
@@ -49,15 +51,15 @@ const lastChecked = computed(() => {
   <div class="up-panel">
     <header class="up-header">
       <h1>更新</h1>
-      <p class="up-sub">保持 Polaris 为最新版本</p>
+      <p class="up-sub">保持教师助手为最新版本</p>
     </header>
 
     <div class="up-body">
       <!-- 当前版本 -->
       <div class="ver-card">
-        <img class="ver-logo" src="../assets/logo.png" alt="北极星" />
+        <img class="ver-logo" src="../assets/logo.png" alt="教师助手" />
         <div class="ver-meta">
-          <div class="ver-name">北极星 · GEO</div>
+          <div class="ver-name">教师助手</div>
           <div class="ver-num">当前版本 v{{ currentVersion || "—" }}</div>
         </div>
         <button
@@ -85,10 +87,20 @@ const lastChecked = computed(() => {
                 发现新版本 <b>v{{ updateVersion }}</b>
               </div>
               <div class="found-hint">
-                {{ updating ? "正在下载，完成后自动重启生效" : "点「立即更新」后台下载安装，自动重启即用" }}
+                <template v-if="updating">正在下载，完成后自动重启生效</template>
+                <template v-else-if="webAction === 'reload'">
+                  服务端已是新版，刷新页面即可加载
+                </template>
+                <template v-else-if="webAction === 'upgrade'">
+                  服务器上的版本较旧，需管理员在部署机上执行升级命令
+                </template>
+                <template v-else>点「立即更新」后台下载安装，自动重启即用</template>
               </div>
             </div>
           </div>
+
+          <!-- Web/Docker 的镜像升级只能由管理员在部署机完成，这里给命令而非假按钮。 -->
+          <div v-if="webAction === 'upgrade'" class="found-cmd">{{ webUpgradeHint }}</div>
 
           <div v-if="updateNotes && !updating" class="found-notes">{{ updateNotes }}</div>
 
@@ -96,13 +108,24 @@ const lastChecked = computed(() => {
             <div class="bar-fill" :style="{ width: updateProgress + '%' }"></div>
           </div>
 
-          <button class="go-btn" :disabled="updating" @click="applyUpdate">
+          <button
+            v-if="webAction !== 'upgrade'"
+            class="go-btn"
+            :disabled="updating"
+            @click="applyUpdate"
+          >
             <OrbitSpinner
               v-if="updating"
               :size="15"
             />
             <Rocket v-else :size="15" :stroke-width="1.9" />
-            <span>{{ updating ? `更新中 ${updateProgress}%` : "立即更新" }}</span>
+            <span>{{
+              updating
+                ? `更新中 ${updateProgress}%`
+                : webAction === "reload"
+                  ? "刷新页面"
+                  : "立即更新"
+            }}</span>
           </button>
         </div>
 
@@ -265,6 +288,20 @@ const lastChecked = computed(() => {
   margin-top: 3px;
   font-size: 11.5px;
   color: var(--muted);
+}
+/* 升级命令：给管理员照抄，等宽字体 + 整段可选中。 */
+.found-cmd {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+  word-break: break-all;
+  user-select: all;
 }
 .found-notes {
   margin-top: 12px;

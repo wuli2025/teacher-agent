@@ -12,7 +12,14 @@ import {
   dialogDismissed,
   applyUpdate,
   dismissUpdate,
+  webAction,
+  webUpgradeHint,
 } from "../composables/useUpdater";
+
+// Web/Docker 版没有「下载安装」这条路，措辞与按钮都得换成它真能做到的事：
+//   reload  → 刷新页面就能吃到新版（用户自己一键完成）
+//   upgrade → 得管理员拉新镜像，主按钮无意义 → 只给命令，不放假按钮
+
 </script>
 
 <template>
@@ -39,7 +46,16 @@ import {
           <p v-else-if="updating" class="upd-desc">
             正在下载更新… 完成后自动重启生效
           </p>
+          <p v-else-if="webAction === 'reload'" class="upd-desc">
+            服务端已是新版，刷新页面即可加载
+          </p>
+          <p v-else-if="webAction === 'upgrade'" class="upd-desc">
+            服务器上的版本较旧，需管理员执行以下命令升级
+          </p>
           <p v-else class="upd-desc">有新内容更新，点击即可立即更新</p>
+
+          <!-- 镜像升级不是浏览器能做的事：给命令，别给一个点了没反应的按钮。 -->
+          <div v-if="webAction === 'upgrade'" class="upd-cmd">{{ webUpgradeHint }}</div>
 
           <div v-if="updateNotes && !updating" class="upd-notes">{{ updateNotes }}</div>
 
@@ -47,12 +63,23 @@ import {
             <div class="upd-bar-fill" :style="{ width: updateProgress + '%' }"></div>
           </div>
 
-          <button class="upd-go" :disabled="updating" @click="applyUpdate">
+          <button
+            v-if="webAction !== 'upgrade'"
+            class="upd-go"
+            :disabled="updating"
+            @click="applyUpdate"
+          >
             <OrbitSpinner
               v-if="updating"
               :size="15"
             />
-            <span>{{ updating ? `更新中 ${updateProgress}%` : "立即更新" }}</span>
+            <span>{{
+              updating
+                ? `更新中 ${updateProgress}%`
+                : webAction === "reload"
+                  ? "刷新页面"
+                  : "立即更新"
+            }}</span>
           </button>
 
           <button
@@ -60,7 +87,7 @@ import {
             class="upd-later"
             @click="dismissUpdate"
           >
-            以后再说
+            {{ webAction === "upgrade" ? "知道了" : "以后再说" }}
           </button>
         </div>
       </Transition>
@@ -138,6 +165,21 @@ import {
 }
 .upd-desc.err {
   color: var(--vermilion);
+}
+/* 升级命令：给管理员照抄，等宽字体 + 可选中。 */
+.upd-cmd {
+  margin: 12px 0 2px;
+  padding: 9px 11px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+  text-align: left;
+  word-break: break-all;
+  user-select: all;
 }
 .upd-notes {
   margin: 12px 0 2px;

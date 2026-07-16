@@ -2,6 +2,8 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, defineAsyncComponent } from "vue";
 import { marked } from "marked";
 import { sanitizeHtml } from "../lib/sanitize";
+import { specViewerHtml, parseSpecLoose } from "../lib/slidesSpec";
+import { resolveSpecImages } from "../lib/specImages";
 import {
   X,
   RefreshCw,
@@ -292,6 +294,65 @@ function editPptx() {
   }
 }
 
+// ── 演示 spec / 原生 pptx → 豆包式播放器预览 ──
+// 对话里(演示工坊之外)模型也会产 polaris.slides.json:它 kind=text,原来只能看生 JSON;
+// 原生 spec 导出的 .pptx 是 binary,原来只有「暂不支持预览」。两者都改走 specViewerHtml
+// —— 与演示工坊同一个确定性渲染器,预览即导出。
+const deckHtml = ref<string>("");
+const deckSpecPath = ref<string | null>(null);
+watch(
+  [() => artifacts.payload, pptxSiblingSpec],
+  async ([p, sib]) => {
+    deckHtml.value = "";
+    deckSpecPath.value = null;
+    if (!p) return;
+    let specText: string | null = null;
+    let specPath: string | null = null;
+    if (/^polaris\.slides\.json$/i.test(p.name) && p.text) {
+      specText = p.text;
+      specPath = p.path;
+    } else if (/\.pptx$/i.test(p.name) && sib) {
+      try {
+        const r = await artifactsApi.read(sib);
+        if (artifacts.payload !== p) return; // 竞态:读盘期间已切走
+        specText = r?.text ?? null;
+        specPath = sib;
+      } catch {
+        return;
+      }
+    }
+    if (!specText || !specPath) return;
+    const { spec } = parseSpecLoose(specText);
+    if (!spec || !Array.isArray(spec.slides) || !spec.slides.length) return;
+    await resolveSpecImages(spec);
+    if (artifacts.payload !== p) return; // 竞态:内联图期间已切走
+    const html = specViewerHtml(spec);
+    if (html) {
+      deckHtml.value = html;
+      deckSpecPath.value = specPath;
+    }
+  },
+  { immediate: true }
+);
+const deckExporting = ref(false);
+const deckError = ref<string | null>(null);
+// 用户主动导出 = 无条件重转(不做 mtime 短路),转完在资源管理器里定位成品
+async function exportDeckPptx() {
+  const sp = deckSpecPath.value;
+  if (!sp || deckExporting.value) return;
+  deckExporting.value = true;
+  deckError.value = null;
+  try {
+    const out = sp.replace(/polaris\.slides\.json$/i, "演示.pptx");
+    await artifactsApi.specToPptx(sp, out);
+    await artifactsApi.reveal(out);
+  } catch (e: any) {
+    deckError.value = `导出 PPTX 失败：${e?.message ?? e}`;
+  } finally {
+    deckExporting.value = false;
+  }
+}
+
 const headIcon = computed(() => {
   const k = artifacts.payload?.kind;
   if (k === "html" || k === "svg") return FileCode;
@@ -491,9 +552,29 @@ function fmtSize(n: number): string {
         </div>
 
         <template v-else-if="artifacts.payload">
+          <!-- 演示 spec / 原生 pptx → 豆包式播放器(与演示工坊同一渲染器,预览即导出)。
+               必须排在 text/binary 分支前:spec 是 kind=text、原生 pptx 是 kind=binary。 -->
+          <div v-if="deckHtml" class="pv-deck">
+            <div v-if="deckError" class="pv-deck-err">{{ deckError }}</div>
+            <div class="pv-deck-bar">
+              <button class="pv-deck-export" :disabled="deckExporting" @click="exportDeckPptx()">
+                <Loader v-if="deckExporting" :size="13" :stroke-width="1.8" class="spin" />
+                <Download v-else :size="13" :stroke-width="1.8" />
+                <span>{{ deckExporting ? "导出中…" : "导出 PPTX" }}</span>
+              </button>
+              <span class="pv-deck-hint">原生可编辑 · 预览即导出</span>
+            </div>
+            <iframe
+              :key="'deck:' + artifacts.payload.path"
+              class="pv-frame"
+              :srcdoc="deckHtml"
+              sandbox="allow-scripts"
+              referrerpolicy="no-referrer"
+            />
+          </div>
           <!-- HTML / SVG → iframe 完整渲染 -->
           <iframe
-            v-if="
+            v-else-if="
               artifacts.payload.kind === 'html' ||
               artifacts.payload.kind === 'svg'
             "
@@ -870,6 +951,54 @@ function fmtSize(n: number): string {
   height: 100%;
   border: none;
   background: #fff;
+}
+/* 演示播放器包壳:顶部导出条 + iframe(播放器自带深底) */
+.pv-deck {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.pv-deck .pv-frame {
+  background: #26262b;
+}
+.pv-deck-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--panel);
+}
+.pv-deck-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 7px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pv-deck-export:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+.pv-deck-export:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.pv-deck-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+.pv-deck-err {
+  padding: 6px 10px;
+  background: var(--vermilion-soft, rgba(168, 62, 50, 0.08));
+  color: var(--vermilion, #a83e32);
+  font-size: 12px;
 }
 .pv-img-wrap {
   flex: 1;

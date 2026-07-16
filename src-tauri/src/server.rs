@@ -183,6 +183,8 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/api/live", get(health))
         .route("/api/ready", get(ready))
         .route("/api/status", get(status))
+        // Web/Docker 版的更新提示要拿服务端版本比对(桌面端走 tauri updater,不用这个)。
+        .route("/api/version", get(version))
         .fallback(get(spa_fallback))
         .with_state(state)
         // 应用数据面(invoke/upload/file/ws)—— 抽出的双壳共用路由,已自带 ApiState。
@@ -439,6 +441,22 @@ fn claude_config_status() -> Value {
 /// 详细依赖/资源状态由 owner-only 且带缓存的 `/api/status` 提供。
 async fn health() -> Response {
     "ok".into_response()
+}
+
+/// 服务端自身版本。**Web/Docker 版的更新提示靠它**：桌面端有 tauri-plugin-updater
+/// 能自己下载安装，浏览器里没有这条路，只能比对版本号后引导人去做对应动作
+/// （前端 useUpdater.ts 的 web 分支）：
+///   · 服务端版本 ≠ 页面里跑的 SPA 版本 → 浏览器缓存了旧 index.html，提示刷新；
+///   · 有更高的已发布版本 → 提示管理员 `docker compose pull && up -d` 换新镜像。
+///
+/// 要登录态（任意角色即可，不像 `/api/status` 限 owner）：版本号本身价值不高，
+/// 但对公网未认证访客暴露精确版本等于给已知漏洞递靶子，而更新提示只在登录后才显示，
+/// 所以鉴权不影响功能。无 IO、无缓存必要。
+async fn version(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if crate::apihub::app_ctx_headers(&state.auth_token, &headers).is_none() {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"未授权"}))).into_response();
+    }
+    Json(json!({ "version": env!("CARGO_PKG_VERSION") })).into_response()
 }
 
 static READY_CACHE: Lazy<tokio::sync::Mutex<Option<(Instant, bool)>>> =

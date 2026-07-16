@@ -32,10 +32,11 @@
   "plugins": {
     "updater": {
       "endpoints": [
+        "https://teacher-agent.pages.dev/downloads/latest.json",
         "https://gh-proxy.com/https://github.com/wuli2025/teacher-agent/releases/latest/download/latest.json",
         "https://github.com/wuli2025/teacher-agent/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzMjVGREVCNjUxMEM4MzUKUldRMXlCQmw2LzBsZzJpaFhFanBZeTc0WjZ1Ull3WGdqVDhiVUNqV0Q0aGgrL2RYYzNRTi9Bb0YK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQzNUQ3RjVCNTRGMjZDRjMKUldUemJQSlVXMzlkUS9OWTdGZEJSeTVPVlVqWkF5S2lxaXdaM1ptaURvVDJDZXlGVWFMTWQxSDkK",
       "windows": {
         "installMode": "passive"
       }

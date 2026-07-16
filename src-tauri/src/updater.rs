@@ -224,10 +224,18 @@ async fn run_check(app: &AppHandle) -> UpdaterState {
 }
 
 /// 构造下载候选源：从 latest.json 给出的 url 里剥出裸 `github.com` 地址，
-/// 再依次套国内镜像前缀、最后回退直连 github。**国内更新失败的根因就是下载这一跳没走镜像**
-/// （检查 latest.json 走了 endpoints 镜像，但 Tauri updater 下载安装包时只认 latest.json 里写死的 url）。
-/// download() 内部对字节做 minisign 验签——镜像若被劫持/返回错误页，签名必不过 → 自动跳到下一个源，
-/// 故镜像顺序安全，最坏退化到直连。非 github 源（如将来自托管）不套镜像、直连。
+/// 再依次套自托管 / 国内镜像前缀、最后回退直连 github。**国内更新失败的根因就是下载这一跳没走镜像**
+/// （检查 latest.json 走了 endpoints 的自托管/镜像，但 Tauri updater 下载安装包时只认 latest.json 里写死的 url）。
+/// download() 内部对字节做 minisign 验签——某源若被劫持/返回错误页，签名必不过 → 自动跳到下一个源，
+/// 故候选顺序安全，最坏退化到直连。非 github 源不套前缀、直连。
+///
+/// **自托管排第一**：`teacher-agent.pages.dev/downloads/<文件名>` 是发版时传上去的同一批包
+/// （见 docs/release-manual.md 与 release.yml 的 cloudflare job），Cloudflare 边缘国内可达性最好、
+/// 不受 github 抽风影响。装包很小(win ~6MB / mac ~14MB)，Pages 扛得住、无需 R2。
+/// 后三个 github 系候选是自托管挂掉时的兜底。
+///
+/// latest.json 里的 url 始终写 github 地址（两个分发渠道共用同一份 latest.json），
+/// 自托管这一跳由这里按文件名拼出来、而非写死进 latest.json——这样 Pages 掉线仍能回落 github。
 fn mirror_candidates(url: &str) -> Vec<String> {
     // latest.json 里的 url 可能本身已是 `https://<镜像>/https://github.com/...`，
     // 取最后一段裸地址，避免把镜像套娃。
@@ -235,17 +243,12 @@ fn mirror_candidates(url: &str) -> Vec<String> {
         Some(idx) => url[idx..].to_string(),
         None => return vec![url.to_string()],
     };
-    // 文件名（路径最后一段）→ Cloudflare 自托管兜底：站点 `polaris-2us.pages.dev/downloads/<文件名>`，
-    // 独立于 github + 镜像，国内可达性最好。装包很小(win 6MB / mac 14MB)，Pages 直接扛得住、无需 R2。
-    // 发版时把 setup.exe 与 Polaris.app.tar.gz 传进站点 downloads/ 并 `wrangler pages deploy`（见 release-manual）。
     let filename = bare.rsplit('/').next().unwrap_or("");
-    let mut out = vec![format!("https://gh-proxy.com/{bare}")];
-    // Cloudflare 排第二：首个源一「卡死」(停滞看门狗 ~30s 触发)就直接切到最可靠的自托管源，而非再耗在第二个 github 镜像上。
+    let mut out = Vec::new();
     if !filename.is_empty() {
-        out.push(format!(
-            "https://polaris-2us.pages.dev/downloads/{filename}"
-        ));
+        out.push(format!("https://teacher-agent.pages.dev/downloads/{filename}"));
     }
+    out.push(format!("https://gh-proxy.com/{bare}"));
     out.push(format!("https://ghfast.top/{bare}"));
     out.push(bare); // 直连 github，最后兜底
     out
@@ -535,21 +538,21 @@ mod tests {
     #[test]
     fn mirror_candidates_wraps_bare_github_url() {
         let c = mirror_candidates(
-            "https://github.com/wuli2025/polaris_coworker/releases/download/v0.2.18/Polaris_0.2.18_x64-setup.exe",
+            "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.1/教师助手_1.0.1_x64-setup.exe",
         );
-        // gh-proxy / Cloudflare / ghfast / 直连 共 4 个候选源。
+        // 自托管 / gh-proxy / ghfast / 直连 共 4 个候选源。
         assert_eq!(c.len(), 4);
-        assert!(c[0].starts_with("https://gh-proxy.com/https://github.com/"));
-        // Cloudflare 排第二（首源卡死即切自托管），按文件名取。
+        // 自托管排第一（国内可达性最好），按文件名取。
         assert_eq!(
-            c[1],
-            "https://polaris-2us.pages.dev/downloads/Polaris_0.2.18_x64-setup.exe"
+            c[0],
+            "https://teacher-agent.pages.dev/downloads/教师助手_1.0.1_x64-setup.exe"
         );
+        assert!(c[1].starts_with("https://gh-proxy.com/https://github.com/"));
         assert!(c[2].starts_with("https://ghfast.top/https://github.com/"));
         // 末位是直连兜底（无镜像前缀）。
         assert_eq!(
             c[3],
-            "https://github.com/wuli2025/polaris_coworker/releases/download/v0.2.18/Polaris_0.2.18_x64-setup.exe"
+            "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.1/教师助手_1.0.1_x64-setup.exe"
         );
     }
 
@@ -557,29 +560,29 @@ mod tests {
     fn mirror_candidates_unwraps_already_mirrored_url() {
         // latest.json 里若已写成镜像 url，不能套娃，要剥回裸地址再重套。
         let c = mirror_candidates(
-            "https://gh-proxy.com/https://github.com/wuli2025/polaris_coworker/releases/download/v0.2.18/Polaris.app.tar.gz",
+            "https://gh-proxy.com/https://github.com/wuli2025/teacher-agent/releases/download/v1.0.1/教师助手.app.tar.gz",
         );
         assert_eq!(c.len(), 4);
-        // Cloudflare 兜底（第二位）按文件名，不带版本路径前缀。
+        // 自托管（首位）按文件名，不带版本路径前缀。
         assert_eq!(
-            c[1],
-            "https://polaris-2us.pages.dev/downloads/Polaris.app.tar.gz"
+            c[0],
+            "https://teacher-agent.pages.dev/downloads/教师助手.app.tar.gz"
         );
         assert_eq!(
             c[3],
-            "https://github.com/wuli2025/polaris_coworker/releases/download/v0.2.18/Polaris.app.tar.gz"
+            "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.1/教师助手.app.tar.gz"
         );
         // 不出现双重镜像前缀。
-        assert!(!c[0].contains("gh-proxy.com/https://gh-proxy.com"));
+        assert!(!c[1].contains("gh-proxy.com/https://gh-proxy.com"));
     }
 
     #[test]
     fn mirror_candidates_passthrough_non_github() {
-        // 非 github 源（如将来自托管 Cloudflare）直连、不套镜像。
-        let c = mirror_candidates("https://polaris-2us.pages.dev/v0.2.18/setup.exe");
+        // 非 github 源（如 latest.json 直接给了自托管地址）直连、不套镜像。
+        let c = mirror_candidates("https://teacher-agent.pages.dev/v1.0.1/setup.exe");
         assert_eq!(
             c,
-            vec!["https://polaris-2us.pages.dev/v0.2.18/setup.exe".to_string()]
+            vec!["https://teacher-agent.pages.dev/v1.0.1/setup.exe".to_string()]
         );
     }
 
