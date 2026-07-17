@@ -7,11 +7,15 @@ import { resolveSpecImages } from "../lib/specImages";
 import { usePolling } from "../composables/usePolling";
 import { useSpecEdit } from "../composables/useSpecEdit";
 import DeckViewer from "./DeckViewer.vue";
+// 播放器实例:导出条上的「编辑」按钮要调它进出自由编辑态(与演示工坊同一入口语义)
+const deckViewerRef = ref<InstanceType<typeof DeckViewer> | null>(null);
 import {
   X,
   RefreshCw,
   FolderOpen,
   Download,
+  Unlock,
+  MousePointer2,
   ExternalLink,
   Globe,
   Maximize2,
@@ -684,6 +688,16 @@ function fmtSize(n: number): string {
             <div v-if="deckError" class="pv-deck-err">{{ deckError }}</div>
             <div class="pv-deck-bar">
               <button
+                v-if="!deckGenerating"
+                class="pv-deck-edit"
+                :class="{ on: deckViewerRef?.freeEdit }"
+                :title="deckViewerRef?.curIsFreeform ? '元素级编辑：拖拽移动 / 拉手柄缩放 / 双击文本改字' : '把本页解锁成自由版式后可拖拽元素（不可逆）'"
+                @click="deckViewerRef?.toggleFreeEdit()"
+              >
+                <component :is="deckViewerRef?.curIsFreeform ? MousePointer2 : Unlock" :size="13" :stroke-width="1.8" />
+                <span>{{ deckViewerRef?.freeEdit ? "完成编辑" : "编辑" }}</span>
+              </button>
+              <button
                 class="pv-deck-export"
                 :disabled="deckExporting || deckGenerating"
                 :title="deckGenerating ? '生成完成后可导出' : '无条件重转并在文件夹中定位'"
@@ -701,6 +715,7 @@ function fmtSize(n: number): string {
               <span v-else class="pv-deck-hint">原生可编辑 · 预览即导出</span>
             </div>
             <DeckViewer
+              ref="deckViewerRef"
               class="pv-deck-viewer"
               :spec="deckSpec"
               :generating="deckGenerating"
@@ -1130,6 +1145,28 @@ function fmtSize(n: number): string {
 .pv-deck-export:disabled {
   opacity: 0.6;
   cursor: default;
+}
+/* 「编辑」是次要动作:描边而非实心,不跟「导出 PPTX」抢主色 */
+.pv-deck-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pv-deck-edit:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.pv-deck-edit.on {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-deep);
 }
 .pv-deck-hint {
   font-size: 11px;

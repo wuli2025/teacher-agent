@@ -9,7 +9,7 @@
 import { computed, ref, watch, onBeforeUnmount, nextTick } from "vue";
 import {
   ChevronLeft, ChevronRight, Loader, PencilLine, Check, Play, Copy, Trash2,
-  ArrowUp, ArrowDown, Plus, Undo2, StickyNote, X, Unlock, MousePointer2,
+  ArrowUp, ArrowDown, Plus, Undo2, StickyNote, X,
 } from "@lucide/vue";
 import {
   specSlidesRender, setSpecText, getSpecText, NEW_SLIDE_LAYOUTS,
@@ -405,9 +405,9 @@ function selectBox(i: number) {
   if (freeEdit.value) ffeRef.value?.select(i);
 }
 
-// 标题栏(父组件)要调放映/缩放,格式面板要读当前页号/选中盒子,工具条要插元素,
+// 标题栏(父组件)要调放映/缩放/进出自由编辑,格式面板要读当前页号/选中盒子,工具条要插元素,
 // 动画面板要预览/按序选中
-defineExpose({ present, page, zoom, setZoom, freeEdit, curIsFreeform, selBoxIdx, addBox, previewAnims, previewingAnims, selectBox });
+defineExpose({ present, page, zoom, setZoom, freeEdit, curIsFreeform, toggleFreeEdit, selBoxIdx, addBox, previewAnims, previewingAnims, selectBox });
 
 // ───────── 点字直改 ─────────
 // 只改文字,不动版式 —— autofit 仍然生效,所以用户**改不坏排版**(这正是"版式态"的红利:
@@ -619,16 +619,6 @@ onBeforeUnmount(() => {
         >
           <component :is="editing ? Check : PencilLine" :size="13" />
           {{ editing ? "完成" : "改字" }}
-        </button>
-        <button
-          v-if="editable && !generating"
-          class="dkv-btn"
-          :class="{ on: freeEdit }"
-          :title="curIsFreeform ? '元素级编辑：拖拽/缩放/删除本页元素' : '把本页解锁成自由版式后可拖拽元素（不可逆）'"
-          @click.stop="toggleFreeEdit"
-        >
-          <component :is="curIsFreeform ? MousePointer2 : Unlock" :size="12" />
-          {{ freeEdit ? "完成编辑" : "自由编辑" }}
         </button>
         <button
           v-if="editable && !generating"

@@ -24,6 +24,8 @@ import {
   Image as ImageIcon,
   Table2,
   BarChart3,
+  Unlock,
+  MousePointer2,
 } from "@lucide/vue";
 import { useAppStore } from "../stores/app";
 import { useChatStore } from "../stores/chat";
@@ -1047,6 +1049,16 @@ function fillDemo() {
             <button class="dk-ghost" :disabled="!previewSpec" title="全屏放映 (F5)" @click="viewerRef?.present()">
               <Play :size="13" /> 放映
             </button>
+            <button
+              v-if="isPpt && previewSpec && phase === 'done'"
+              class="dk-ghost"
+              :class="{ on: viewerRef?.freeEdit }"
+              :title="viewerRef?.curIsFreeform ? '元素级编辑：拖拽移动 / 拉手柄缩放 / 双击文本改字' : '把本页解锁成自由版式后可拖拽元素（不可逆）'"
+              @click="viewerRef?.toggleFreeEdit()"
+            >
+              <component :is="viewerRef?.curIsFreeform ? MousePointer2 : Unlock" :size="13" />
+              {{ viewerRef?.freeEdit ? "完成编辑" : "编辑" }}
+            </button>
             <button v-if="isPpt && specOut" class="dk-primary sm" :disabled="exporting || phase === 'generating'" @click="exportPptx">
               <Loader v-if="exporting" :size="13" class="spin" /><FileType2 v-else :size="13" />
               {{ exporting ? "导出中…" : "导出 PPTX" }}
@@ -1441,6 +1453,7 @@ function fillDemo() {
 .dk-ghost { display: inline-flex; align-items: center; gap: 4px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-2); font-size: 11.5px; cursor: pointer; transition: border-color .15s, color .15s; }
 .dk-ghost:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
 .dk-ghost:disabled { opacity: .5; cursor: default; }
+.dk-ghost.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-deep); }
 
 /* 右主区 */
 .dk-main { display: flex; flex-direction: column; overflow: hidden; position: relative; }

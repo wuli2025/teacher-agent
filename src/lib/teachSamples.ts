@@ -130,7 +130,7 @@ const MATH_SAMPLES: TeachSample[] = withDecks([
 
 // ─────────── AI 教案：取几套真课件主题作教案示例 ───────────
 const LESSON_SAMPLES: TeachSample[] = withDecks([
-  { id: "lp_beiying", title: "《背影》教学设计", subtitle: "三维目标 · 教学流程", cover: "chinese_beiying", grade: "初中", by: "语文", prompt: "为朱自清《背影》写一份完整教案，含教学目标、重难点、教学过程与板书设计。" },
+  { id: "lp_beiying", title: "《背影》教学设计", subtitle: "评价任务 · 教学流程", cover: "chinese_beiying", grade: "初中", by: "语文", prompt: "为朱自清《背影》写一份完整教案，含教学目标、重难点、教学过程与板书设计。" },
   { id: "lp_qinyuanchun", title: "《沁园春·长沙》教案", subtitle: "学情分析 · 课时安排", cover: "senior_chinese_qinyuanchun", grade: "高中", by: "语文", prompt: "为《沁园春·长沙》写一份完整教案，含学情分析、诵读设计与意象探究活动。" },
   { id: "lp_photosynthesis", title: "光合作用 · 教案", subtitle: "实验探究 · 概念建构", cover: "bio_photosynthesis", grade: "初中", by: "生物", prompt: "为《绿色植物的光合作用》写一份完整教案，含探究实验设计、教学过程与作业。" },
   { id: "lp_opium", title: "《鸦片战争》教案", subtitle: "史料 · 家国情怀", cover: "history_opium", grade: "初中", by: "历史", prompt: "为《鸦片战争》写一份完整教案，含史料研读、时间线梳理与家国情怀渗透。" },
@@ -158,7 +158,18 @@ export const MODES: Record<TeachMode, ModeDef> = {
     skillIds: [],
     goal: "撰写一份规范、可直接使用的教学教案（Markdown/文档）并保存到产物目录",
     buildPrompt: (t) =>
-      `请撰写一份规范、可直接拿去上课的【教学教案】，结构包含：教学目标（三维）、教学重难点、学情分析、教学准备、教学过程（分环节含师生活动与设计意图）、板书设计、作业与教学反思。主题：\n\n${t}`,
+      `请撰写一份规范、可直接拿去上课的【教学教案】，按新课标核心素养导向设计，结构与顺序如下：\n` +
+      `1. 学情分析（本班学生已有基础与可能的障碍）\n` +
+      `2. 教学目标：指向学科核心素养，每条都用可观察可评价的行为动词，不写「了解」「体会」这类无法检测的空目标\n` +
+      `3. 教学重难点\n` +
+      `4. 评价任务：先写「怎么知道学生学会了」，再写「怎么教」——每条目标都要有对应的评价任务\n` +
+      `5. 教学准备\n` +
+      `6. 教学过程：分环节写，每环节含师生活动、设计意图与时间分配，各环节时间加起来等于课时总长\n` +
+      `7. 预设学生典型错误与应对：至少两处，标在对应环节里\n` +
+      `8. 板书要点\n` +
+      `9. 作业设计：遵守双减，总量克制、分层可选，不布置机械重复抄写\n` +
+      `10. 末尾用一句话说明「本课的评价任务如何检测目标达成」\n\n` +
+      `主题：\n\n${t}`,
     samples: LESSON_SAMPLES,
   },
   math: {
