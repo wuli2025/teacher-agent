@@ -17,7 +17,7 @@ pub(crate) const DECK_ID: &str = "polaris-deck-studio";
 //     point/dot 四类此前完全没写，模型不知道能画坐标轴/受力图/几何图）；补 `click`
 //     单击逐步动画（引擎 build_timing() 早就出真 <p:timing>，此前零文档）；标注
 //     freeform 的 text 不走 autofit。**引擎能力早就有，只是模型读不到 → 白白用不上。**
-pub(crate) const DECK_VERSION: &str = "4";
+pub(crate) const DECK_VERSION: &str = "5";
 pub(crate) const DECK_SKILL_MD: &str =
     include_str!("../../../../src/templates/skills/polaris-deck-studio/SKILL.md");
 pub(crate) const DECK_THEMES_CSS: &str =

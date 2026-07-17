@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, onMounted } from "vue";
+import { ref, computed, watch, onBeforeUnmount, onMounted } from "vue";
 import { Paperclip, Image as ImageIcon, Mic, Send, Search, Loader, Eye, Sparkles, X, ChevronLeft, ChevronRight, Maximize, MonitorPlay } from "@lucide/vue";
 import { useAppStore } from "../stores/app";
 import { useChatStore } from "../stores/chat";
 import { chat as chatApi, artifacts, invoke, listen, isTauri, type AttachedFile } from "../tauri";
 import { useFileDrop } from "../composables/useFileDrop";
-import { MODES, GRADES, type Grade, type TeachSample } from "../lib/teachSamples";
+import { MODES, GRADES, subjectOf, subjectsOf, type Grade, type TeachSample } from "../lib/teachSamples";
 import { toast } from "../composables/useToast";
 
 // KeepAlive 友好命名（虽然 Home 很轻，保持一致）
@@ -318,15 +318,23 @@ async function makeSame(s: TeachSample) {
   }
 }
 
-// ───────── 范例库过滤（年级 + 搜索） ─────────
+// ───────── 范例库过滤（年级 + 学科 + 搜索） ─────────
 const grade = ref<Grade>("全部");
+const subject = ref("全部");
 const search = ref("");
 // 「全部」视图高中在前（主力用户是高中教师），同年级保持录入顺序（sort 稳定）
-const GRADE_RANK: Record<string, number> = { 高中: 0, 初中: 1, 小学: 2, 学前: 3, 其他: 4 };
+const GRADE_RANK: Record<string, number> = { 高中: 0, 初中: 1, 小学: 2, 其他: 3 };
+// 学科 tab 由当前工坊的范例现算：换工坊（教案/数学课件）时学科随之变少，不会留下点开是空的 tab
+const subjectTabs = computed(() => ["全部", ...subjectsOf(mode.value.samples)]);
+// 切工坊后旧学科可能不存在了，回落到「全部」
+watch(subjectTabs, (tabs) => {
+  if (!tabs.includes(subject.value)) subject.value = "全部";
+});
 const filteredSamples = computed(() => {
   let list = mode.value.samples;
   if (grade.value !== "全部") list = list.filter((s) => s.grade === grade.value);
   else list = [...list].sort((a, b) => (GRADE_RANK[a.grade] ?? 9) - (GRADE_RANK[b.grade] ?? 9));
+  if (subject.value !== "全部") list = list.filter((s) => subjectOf(s) === subject.value);
   const q = search.value.trim().toLowerCase();
   if (q) list = list.filter((s) => (s.title + s.subtitle).toLowerCase().includes(q));
   return list;
@@ -387,6 +395,9 @@ function onCoverErr(e: Event, s: TeachSample) {
             <button class="cb-ic" title="添加图片" @click="pickFiles(true)">
               <ImageIcon :size="19" :stroke-width="1.7" />
             </button>
+            <span v-if="uploading" class="up-hint"><Loader :size="13" class="spin" /> 处理素材…</span>
+          </div>
+          <div class="cb-right">
             <button
               class="cb-ic mic"
               :class="{ live: dictating }"
@@ -396,12 +407,11 @@ function onCoverErr(e: Event, s: TeachSample) {
               <Mic :size="19" :stroke-width="1.7" />
               <span v-if="dictating" class="mic-ping"></span>
             </button>
-            <span v-if="uploading" class="up-hint"><Loader :size="13" class="spin" /> 处理素材…</span>
+            <button class="send" :disabled="!canSend" title="生成 (Enter)" @click="generate">
+              <Loader v-if="busy" :size="18" class="spin" />
+              <Send v-else :size="18" :stroke-width="1.8" />
+            </button>
           </div>
-          <button class="send" :disabled="!canSend" title="生成 (Enter)" @click="generate">
-            <Loader v-if="busy" :size="18" class="spin" />
-            <Send v-else :size="18" :stroke-width="1.8" />
-          </button>
         </div>
       </div>
 
@@ -426,6 +436,19 @@ function onCoverErr(e: Event, s: TeachSample) {
           <Search :size="15" :stroke-width="1.8" />
           <input v-model="search" placeholder="输入知识点搜索资源" />
         </div>
+      </div>
+
+      <!-- 学科筛选：与年级正交，tab 由当前工坊实有范例现算 -->
+      <div class="subject-tabs">
+        <button
+          v-for="sj in subjectTabs"
+          :key="sj"
+          class="sjt"
+          :class="{ on: subject === sj }"
+          @click="subject = sj"
+        >
+          {{ sj }}
+        </button>
       </div>
 
       <!-- 案例卡片网格 -->
@@ -726,6 +749,12 @@ function onCoverErr(e: Event, s: TeachSample) {
   align-items: center;
   gap: 4px;
 }
+/* 话筒与发送同组：语音是「说完就发」的一步，放在发送手边而不是附件那头 */
+.cb-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .cb-ic {
   position: relative;
   width: 34px;
@@ -849,6 +878,33 @@ function onCoverErr(e: Event, s: TeachSample) {
   color: var(--primary, #6a5cff);
   font-weight: 700;
   background: color-mix(in srgb, var(--primary, #6a5cff) 10%, transparent);
+}
+/* 学科 tab：年级是主筛选，学科次一级 —— 用描边胶囊而非实底，避免两行 tab 在视觉上打架 */
+.subject-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -6px 0 18px;
+}
+.sjt {
+  border: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.14s, background 0.14s, border-color 0.14s;
+}
+.sjt:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+.sjt.on {
+  color: var(--primary, #6a5cff);
+  border-color: color-mix(in srgb, var(--primary, #6a5cff) 40%, transparent);
+  background: color-mix(in srgb, var(--primary, #6a5cff) 8%, transparent);
 }
 .lib-search {
   display: flex;

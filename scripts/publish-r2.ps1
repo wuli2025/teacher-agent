@@ -2,7 +2,8 @@
 # 把某个版本的安装包 + latest.json 同步到自托管更新源（Cloudflare R2）。
 #
 # 什么时候用它：
-#   · 仓库没配 CLOUDFLARE_API_TOKEN → release.yml 的自托管那步会跳过，用这个补上；
+#   · 仓库没配 CLOUDFLARE_API_TOKEN → release.yml 的自托管那步会直接报错停下（private 仓下
+#     自托管是唯一活源，不能静默跳过），此时用这个脚本从本机补传；
 #   · 自托管源供了旧包 / 上传失败 → 手动重发。
 #
 # 平时不需要手跑：配了 CLOUDFLARE_API_TOKEN(Object Read & Write) + CLOUDFLARE_ACCOUNT_ID 后，
@@ -19,7 +20,9 @@ param(
   [Parameter(Mandatory = $true)][string]$Tag,
   [string]$Repo = "wuli2025/teacher-agent",
   [string]$Bucket = "teacher-agent-dist",
-  [string]$PublicBase = "https://pub-667c9f15cb424a8db14d7b4ef7bbb481.r2.dev/downloads"
+  # 自定义域（v1.0.3+ 客户端的第一顺位）。r2.dev 是同一个桶的另一个门，
+  # v1.0.2 及更早的客户端写死走它；两者同桶，验一个即可证明对象已就位。
+  [string]$PublicBase = "https://teacher-dl.llmwiki.cloud/downloads"
 )
 
 $ErrorActionPreference = "Stop"

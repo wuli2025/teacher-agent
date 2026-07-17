@@ -11,7 +11,7 @@
 
 export type TeachMode = "ppt" | "lesson" | "math";
 
-export type Grade = "全部" | "学前" | "小学" | "初中" | "高中" | "其他";
+export type Grade = "全部" | "小学" | "初中" | "高中" | "其他";
 
 export interface TeachSample {
   id: string;
@@ -176,4 +176,19 @@ export const MODES: Record<TeachMode, ModeDef> = {
 };
 
 export const MODE_ORDER: TeachMode[] = ["ppt", "lesson", "math"];
-export const GRADES: Grade[] = ["全部", "学前", "小学", "初中", "高中", "其他"];
+export const GRADES: Grade[] = ["全部", "小学", "初中", "高中", "其他"];
+
+// ─────────── 学科筛选 ───────────
+// 学科真源就是范例的 by 署名，但 by 里可能带后缀（如「语文 · 精品范本」），取「·」前一段做学科名。
+/** 从范例的署名里取出学科名；无署名返回空串（不进学科 tab）。 */
+export function subjectOf(s: TeachSample): string {
+  return (s.by ?? "").split("·")[0].trim();
+}
+/** 当前模式下实际有范例的学科，按 SUBJECT_RANK 排序 —— 每个 tab 点开都有内容，不会是空白。 */
+export function subjectsOf(samples: TeachSample[]): string[] {
+  const set = new Set(samples.map(subjectOf).filter(Boolean));
+  return [...set].sort((a, b) => (SUBJECT_RANK[a] ?? 99) - (SUBJECT_RANK[b] ?? 99));
+}
+const SUBJECT_RANK: Record<string, number> = {
+  语文: 0, 数学: 1, 英语: 2, 物理: 3, 化学: 4, 生物: 5, 道法: 6, 历史: 7, 地理: 8,
+};

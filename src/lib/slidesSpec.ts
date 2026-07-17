@@ -164,6 +164,108 @@ function esc(s: unknown): string {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/**
+ * 可编辑标记:给承载文字的元素打 `data-e="<字段路径>"`,DeckViewer 据此把用户改的
+ * 文字回写进 spec 的对应字段(见 setSpecText)。路径**相对单页**(slides[i] 之内),
+ * 因为同一页 HTML 会同时被缩略图与舞台复用,页号由组件自己知道。
+ * 只标**纯文字叶子**:标题/副标题/kicker/bullet/卡片头尾/数字/引文/freeform 文本盒。
+ */
+function de(path: string): string {
+  return ` data-e="${path}"`;
+}
+
+/** 按 `a.0.b` 形式的路径取值(数组下标用数字段)。 */
+function getPath(obj: any, path: string): any {
+  return path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
+}
+
+/**
+ * 把用户编辑的文字写回单页 spec 的 `path` 字段。返回是否真的改动了。
+ * 只写字符串叶子;路径不存在/类型不符就拒绝(宁可不改,也不要把 spec 写坏)。
+ */
+export function setSpecText(slide: any, path: string, value: string): boolean {
+  const keys = path.split(".");
+  const last = keys.pop();
+  if (!last) return false;
+  const host = keys.reduce((o, k) => (o == null ? o : o[k]), slide);
+  if (host == null || typeof host !== "object") return false;
+  const old = host[last];
+  // points[] 里的裸字符串项 与 各种 string 字段:都只接受 string→string
+  if (old !== undefined && typeof old !== "string") return false;
+  if (String(old ?? "") === value) return false;
+  host[last] = value;
+  return true;
+}
+
+/** 该路径当前的文字(给编辑器做「没变就不写盘」判断)。 */
+export function getSpecText(slide: any, path: string): string {
+  const v = getPath(slide, path);
+  return typeof v === "string" ? v : "";
+}
+
+// ───────── 页面级操作(增/删/复制/重排/备注)─────────
+// 全部是**纯 spec 变换**:改的是 slides 数组本身,不碰任何版式数学 —— 增删页之后
+// 每页仍各自 autofit,排版不会被改坏。播放器只负责发意图(SlideOp),写盘/重转由调用方做。
+
+export type SlideOp =
+  | { kind: "dup"; index: number }
+  | { kind: "del"; index: number }
+  | { kind: "move"; index: number; to: number }
+  | { kind: "add"; index: number; layout: string }
+  | { kind: "notes"; index: number; value: string };
+
+/** 「加页」可选的版式 + 各自的占位内容(照 SKILL.md 的字段表填,加完即可点字改)。 */
+export const NEW_SLIDE_LAYOUTS: { id: string; name: string; make: () => SlidePage }[] = [
+  { id: "bullets", name: "要点页", make: () => ({ layout: "bullets", title: "新页面", points: ["要点一", "要点二", "要点三"] }) },
+  { id: "section", name: "章节页", make: () => ({ layout: "section", kicker: "SECTION", title: "章节标题" }) },
+  { id: "two-col", name: "两栏", make: () => ({ layout: "two-col", title: "新页面", left: { head: "左栏", points: ["要点一", "要点二"] }, right: { head: "右栏", points: ["要点一", "要点二"] } }) },
+  { id: "compare", name: "对比", make: () => ({ layout: "compare", title: "对比", items: [{ head: "方案 A", body: "说明文字" }, { head: "方案 B", body: "说明文字" }] }) },
+  { id: "stats", name: "数据", make: () => ({ layout: "stats", title: "关键数据", items: [{ value: "80%", label: "指标一", desc: "说明" }, { value: "3x", label: "指标二", desc: "说明" }] }) },
+  { id: "timeline", name: "时间线", make: () => ({ layout: "timeline", title: "流程", steps: [{ head: "第一步", body: "说明" }, { head: "第二步", body: "说明" }, { head: "第三步", body: "说明" }] }) },
+  { id: "quote", name: "引用", make: () => ({ layout: "quote", text: "在这里写一句话", by: "出处" }) },
+  { id: "closing", name: "结尾", make: () => ({ layout: "closing", title: "谢谢", subtitle: "欢迎提问" }) },
+];
+
+/**
+ * 把一次页面操作应用到 spec 对象(**原地改**)。返回是否真的改动了。
+ * 越界/无意义的操作(把第一页上移、删到零页)一律拒绝 —— 宁可不改,也不要把 spec 写坏。
+ */
+export function applySlideOp(spec: any, op: SlideOp): boolean {
+  const slides: SlidePage[] = spec?.slides;
+  if (!Array.isArray(slides)) return false;
+  const i = op.index;
+  if (op.kind !== "add" && (i < 0 || i >= slides.length)) return false;
+  switch (op.kind) {
+    case "dup":
+      // 深拷贝:浅拷贝会让两页共享 points/items 数组,改一页另一页跟着变
+      slides.splice(i + 1, 0, JSON.parse(JSON.stringify(slides[i])));
+      return true;
+    case "del":
+      if (slides.length <= 1) return false; // 空 spec 渲染不出东西,留最后一页
+      slides.splice(i, 1);
+      return true;
+    case "move": {
+      const to = Math.max(0, Math.min(op.to, slides.length - 1));
+      if (to === i) return false;
+      slides.splice(to, 0, slides.splice(i, 1)[0]);
+      return true;
+    }
+    case "add": {
+      const tpl = NEW_SLIDE_LAYOUTS.find((l) => l.id === op.layout) ?? NEW_SLIDE_LAYOUTS[0];
+      slides.splice(Math.max(0, Math.min(i, slides.length)), 0, tpl.make());
+      return true;
+    }
+    case "notes": {
+      const v = op.value.trim();
+      const sl = slides[i] as SlidePage;
+      if ((sl.notes ?? "") === v) return false;
+      if (v) sl.notes = v;
+      else delete sl.notes;
+      return true;
+    }
+  }
+}
+
 // ───────── 自适应字号(与 pptx_native.rs 的 autofit 逐行同构)─────────
 // 引擎按每页内容量反算字号(行少撑大、行多才收)。预览必须用**同一套算法与同一批常量**,
 // 否则预览一个字号、导出另一个字号 —— 这正是「预览即导出」要防的事。
@@ -229,21 +331,31 @@ function fs(pt: number): string {
   return `font-size:${((pt * PT2PX * 100) / 1280).toFixed(3)}cqw`;
 }
 
-/** points → HTML。`size` 由调用方 autofit 算好后传入(与导出同字号)。 */
-function pointsHtml(points: SlidePage["points"], pal: Palette, size: number): string {
+/**
+ * points → HTML。`size` 由调用方 autofit 算好后传入(与导出同字号)。
+ * `base` = 该 points 数组在单页 spec 里的路径前缀(如 `points` / `left.points`),
+ * 用来给每个 bullet 打可编辑标记;不传则不可编辑。
+ */
+function pointsHtml(points: SlidePage["points"], pal: Palette, size: number, base?: string): string {
   if (!Array.isArray(points)) return "";
   const li: string[] = [];
-  for (const p of points) {
+  points.forEach((p, i) => {
     if (typeof p === "string") {
-      li.push(`<li>${esc(p)}</li>`);
+      // 裸字符串项:路径就是 `<base>.<i>`
+      li.push(`<li${base ? de(`${base}.${i}`) : ""}>${esc(p)}</li>`);
     } else if (p && typeof p === "object") {
       // 子条降 3pt(与 Rust 的 rel:-3 一致)
       const subs = Array.isArray(p.sub) && p.sub.length
-        ? `<ul class="sub" style="${fs(size - 3)}">${p.sub.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>`
+        ? `<ul class="sub" style="${fs(size - 3)}">${p.sub
+            .map((s, j) => `<li${base ? de(`${base}.${i}.sub.${j}`) : ""}>${esc(s)}</li>`)
+            .join("")}</ul>`
         : "";
-      li.push(`<li>${esc(p.text ?? "")}${subs}</li>`);
+      // 有子条时外层 li 不能整体可编辑(会把子条文字一起吞进 text),
+      // 故把 text 单独包一层 span 挂标记。
+      const txt = `<span${base ? de(`${base}.${i}.text`) : ""}>${esc(p.text ?? "")}</span>`;
+      li.push(`<li>${txt}${subs}</li>`);
     }
-  }
+  });
   return li.length
     ? `<ul class="pts" style="--acc:${pal.accent};${fs(size)}">${li.join("")}</ul>`
     : "";
@@ -253,7 +365,7 @@ function pointsHtml(points: SlidePage["points"], pal: Palette, size: number): st
 function headerHtml(title?: string): string {
   if (!title) return "";
   const size = autofit([{ em: emWidth(title), rel: 0, after: 0 }], 1120, 64, 22, 32);
-  return `<h2 class="hd" style="${fs(size)}">${esc(title)}</h2><div class="rule"></div>`;
+  return `<h2 class="hd" style="${fs(size)}"${de("title")}>${esc(title)}</h2><div class="rule"></div>`;
 }
 
 function slideHtml(sl: SlidePage, pal: Palette): string {
@@ -264,9 +376,9 @@ function slideHtml(sl: SlidePage, pal: Palette): string {
     case "closing": {
       const title = sl.title || (layout === "closing" ? "谢谢" : "");
       inner = `<div class="center">
-        ${sl.kicker ? `<div class="kick" style="${fs(17)}">${esc(sl.kicker)}</div>` : ""}
-        <h1 style="${fs(coverTitleSize(title))}">${esc(title)}</h1><div class="rule mid"></div>
-        ${sl.subtitle ? `<p class="sub" style="${fs(coverSubSize(sl.subtitle))}">${esc(sl.subtitle)}</p>` : ""}
+        ${sl.kicker ? `<div class="kick" style="${fs(17)}"${de("kicker")}>${esc(sl.kicker)}</div>` : ""}
+        <h1 style="${fs(coverTitleSize(title))}"${de("title")}>${esc(title)}</h1><div class="rule mid"></div>
+        ${sl.subtitle ? `<p class="sub" style="${fs(coverSubSize(sl.subtitle))}"${de("subtitle")}>${esc(sl.subtitle)}</p>` : ""}
       </div>`;
       break;
     }
@@ -274,8 +386,8 @@ function slideHtml(sl: SlidePage, pal: Palette): string {
       const t = sl.title ?? "";
       const size = autofit([{ em: emWidth(t), rel: 0, after: 0 }], 1040, 90, 26, 44);
       inner = `<div class="sect"><div class="bar"></div><div>
-        ${sl.kicker ? `<div class="kick" style="${fs(17)}">${esc(sl.kicker)}</div>` : ""}
-        <h1 class="sec-t" style="${fs(size)}">${esc(t)}</h1></div></div>`;
+        ${sl.kicker ? `<div class="kick" style="${fs(17)}"${de("kicker")}>${esc(sl.kicker)}</div>` : ""}
+        <h1 class="sec-t" style="${fs(size)}"${de("title")}>${esc(t)}</h1></div></div>`;
       break;
     }
     case "two-col": {
@@ -289,11 +401,11 @@ function slideHtml(sl: SlidePage, pal: Palette): string {
         }),
         24
       );
-      const col = (c?: SpecCol) =>
+      const col = (c: SpecCol | undefined, side: "left" | "right") =>
         c
-          ? `<div class="card">${c.head ? `<div class="chead" style="${fs(size + 2)}">${esc(c.head)}</div>` : ""}${pointsHtml(c.points, pal, size)}</div>`
+          ? `<div class="card">${c.head ? `<div class="chead" style="${fs(size + 2)}"${de(`${side}.head`)}>${esc(c.head)}</div>` : ""}${pointsHtml(c.points, pal, size, `${side}.points`)}</div>`
           : "";
-      inner = `${headerHtml(sl.title)}<div class="cols">${col(sl.left)}${col(sl.right)}</div>`;
+      inner = `${headerHtml(sl.title)}<div class="cols">${col(sl.left, "left")}${col(sl.right, "right")}</div>`;
       break;
     }
     case "compare": {
@@ -314,11 +426,14 @@ function slideHtml(sl: SlidePage, pal: Palette): string {
         22
       );
       const cards = items
-        .map((it) => {
-          const body = (it.body ?? "")
-            .split("\n").filter((l) => l.trim())
-            .map((l) => `<p style="${fs(size)}">${esc(l.trim())}</p>`).join("");
-          return `<div class="card">${it.head ? `<div class="chead" style="${fs(size + 3)}">${esc(it.head)}</div>` : ""}${body}${pointsHtml(it.points, pal, size)}</div>`;
+        .map((it, i) => {
+          // body 是「\n 分行的整块文本」,拆行只为排版;编辑要回写整块 → 标记打在容器上,
+          // 由 DeckViewer 用 innerText 取回换行(逐行标记会把一行写成整个 body)。
+          const lines = (it.body ?? "").split("\n").filter((l) => l.trim());
+          const body = lines.length
+            ? `<div${de(`items.${i}.body`)}>${lines.map((l) => `<p style="${fs(size)}">${esc(l.trim())}</p>`).join("")}</div>`
+            : "";
+          return `<div class="card">${it.head ? `<div class="chead" style="${fs(size + 3)}"${de(`items.${i}.head`)}>${esc(it.head)}</div>` : ""}${body}${pointsHtml(it.points, pal, size, `items.${i}.points`)}</div>`;
         })
         .join("");
       inner = `${headerHtml(sl.title)}<div class="cmp" style="--n:${items.length || 1}">${cards}</div>`;
@@ -329,14 +444,14 @@ function slideHtml(sl: SlidePage, pal: Palette): string {
       const n = Math.max(1, items.length);
       const cw = Math.floor((1120 - 28 * (n - 1)) / n); // 整除,同 Rust
       const cards = items
-        .map((it) => {
+        .map((it, i) => {
           // value / desc 各自 autofit(与 Rust 同界),label 固定 20pt
           const vs = it.value ? autofit([{ em: emWidth(it.value), rel: 0, after: 0 }], cw - 40, 120, 22, 60) : 0;
           const ds = it.desc ? autofit([{ em: emWidth(it.desc), rel: 0, after: 0 }], cw - 40, 90, 10, 16) : 0;
           return `<div class="card stat">
-            ${it.value ? `<div class="num" style="${fs(vs)}">${esc(it.value)}</div>` : ""}
-            ${it.label ? `<div class="nlabel" style="${fs(20)}">${esc(it.label)}</div>` : ""}
-            ${it.desc ? `<div class="ndesc" style="${fs(ds)}">${esc(it.desc)}</div>` : ""}
+            ${it.value ? `<div class="num" style="${fs(vs)}"${de(`items.${i}.value`)}>${esc(it.value)}</div>` : ""}
+            ${it.label ? `<div class="nlabel" style="${fs(20)}"${de(`items.${i}.label`)}>${esc(it.label)}</div>` : ""}
+            ${it.desc ? `<div class="ndesc" style="${fs(ds)}"${de(`items.${i}.desc`)}>${esc(it.desc)}</div>` : ""}
           </div>`;
         })
         .join("");
@@ -360,9 +475,9 @@ function slideHtml(sl: SlidePage, pal: Palette): string {
       const cells = steps
         .map(
           (st, i) => `<div class="step"><div class="dot">${i + 1}</div>
-            ${st.head ? `<div class="shead" style="${fs(size + 3)}">${esc(st.head)}</div>` : ""}
+            ${st.head ? `<div class="shead" style="${fs(size + 3)}"${de(`steps.${i}.head`)}>${esc(st.head)}</div>` : ""}
             ${st.body
-              ? `<div class="sbody" style="${fs(size)}">${st.body.split("\n").filter((l) => l.trim()).map((l) => `<p>${esc(l.trim())}</p>`).join("")}</div>`
+              ? `<div class="sbody" style="${fs(size)}"${de(`steps.${i}.body`)}>${st.body.split("\n").filter((l) => l.trim()).map((l) => `<p>${esc(l.trim())}</p>`).join("")}</div>`
               : ""}
           </div>`,
         )
@@ -373,8 +488,8 @@ function slideHtml(sl: SlidePage, pal: Palette): string {
     case "quote": {
       const qs = autofit([{ em: emWidth(sl.text), rel: 0, after: 0 }], 960, 220, 18, 40);
       inner = `<div class="quote"><div class="qmark">“</div>
-        <p class="qtext" style="${fs(qs)}">${esc(sl.text ?? "")}</p>
-        ${sl.by ? `<p class="qby" style="${fs(18)}">—— ${esc(sl.by)}</p>` : ""}</div>`;
+        <p class="qtext" style="${fs(qs)}"${de("text")}>${esc(sl.text ?? "")}</p>
+        ${sl.by ? `<p class="qby" style="${fs(18)}">—— <span${de("by")}>${esc(sl.by)}</span></p>` : ""}</div>`;
       break;
     }
     case "image-full": {
@@ -382,9 +497,9 @@ function slideHtml(sl: SlidePage, pal: Palette): string {
       const t = sl.title ?? "";
       inner = `<div class="ifull">${imgHtml(sl.image)}<div class="scrim"></div>
         <div class="center on-img">
-          ${sl.kicker ? `<div class="kick on-img" style="${fs(17)}">${esc(sl.kicker)}</div>` : ""}
-          <h1 style="${fs(coverTitleSize(t))}">${esc(t)}</h1><div class="rule mid"></div>
-          ${sl.subtitle ? `<p class="sub on-img" style="${fs(coverSubSize(sl.subtitle))}">${esc(sl.subtitle)}</p>` : ""}
+          ${sl.kicker ? `<div class="kick on-img" style="${fs(17)}"${de("kicker")}>${esc(sl.kicker)}</div>` : ""}
+          <h1 style="${fs(coverTitleSize(t))}"${de("title")}>${esc(t)}</h1><div class="rule mid"></div>
+          ${sl.subtitle ? `<p class="sub on-img" style="${fs(coverSubSize(sl.subtitle))}"${de("subtitle")}>${esc(sl.subtitle)}</p>` : ""}
         </div></div>`;
       break;
     }
@@ -396,8 +511,8 @@ function slideHtml(sl: SlidePage, pal: Palette): string {
       const size = autofit(fl, 544 - BULLET_INDENT, 446, 13, 30);
       const media = `<div class="ihalf">${imgHtml(sl.image)}</div>`;
       const txt = `<div class="ihalf txt">
-        ${sl.head ? `<div class="chead" style="${fs(size + 2)}">${esc(sl.head)}</div>` : ""}
-        ${pointsHtml(sl.points, pal, size)}</div>`;
+        ${sl.head ? `<div class="chead" style="${fs(size + 2)}"${de("head")}>${esc(sl.head)}</div>` : ""}
+        ${pointsHtml(sl.points, pal, size, "points")}</div>`;
       inner = `${headerHtml(sl.title)}<div class="cols">${right ? txt + media : media + txt}</div>`;
       break;
     }
@@ -413,7 +528,7 @@ function slideHtml(sl: SlidePage, pal: Palette): string {
       pointFitLines(sl.points, fl);
       const size = autofit(fl, 1120 - BULLET_INDENT, 470, 16, 36);
       // .fillbox:与 Rust 的 anchor="ctr" 对应 —— 内容放不满时垂直居中,不在下方留死白。
-      inner = `${headerHtml(sl.title)}<div class="fillbox">${pointsHtml(sl.points, pal, size)}</div>`;
+      inner = `${headerHtml(sl.title)}<div class="fillbox">${pointsHtml(sl.points, pal, size, "points")}</div>`;
     }
   }
   return `<section class="sl">${inner}</section>`;
@@ -562,10 +677,12 @@ function freeBoxHtml(b: FreeBox, pal: Palette, i: number): string {
         ["middle", "center", "ctr"].includes(String(b.anchor)) ? "center"
         : ["bottom", "b"].includes(String(b.anchor)) ? "flex-end"
         : "flex-start";
-      const src = Array.isArray(b.lines) ? b.lines.filter((l) => typeof l === "string") : [b.text];
+      // lines 多行:逐行可编辑(各是独立字段);text 单行:整盒可编辑
+      const multi = Array.isArray(b.lines);
+      const src = multi ? b.lines!.filter((l) => typeof l === "string") : [b.text];
       const body = src
         .filter((t) => t !== undefined && t !== null)
-        .map((t) => `<p>${esc(t)}</p>`)
+        .map((t, j) => `<p${multi ? de(`boxes.${i}.lines.${j}`) : de(`boxes.${i}.text`)}>${esc(t)}</p>`)
         .join("");
       if (!body) return "";
       return box(

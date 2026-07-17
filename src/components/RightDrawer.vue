@@ -2,9 +2,10 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, defineAsyncComponent } from "vue";
 import { marked } from "marked";
 import { sanitizeHtml } from "../lib/sanitize";
-import { parseSpecLoose } from "../lib/slidesSpec";
+import { parseSpecLoose, setSpecText, applySlideOp, type SlideOp } from "../lib/slidesSpec";
 import { resolveSpecImages } from "../lib/specImages";
 import { usePolling } from "../composables/usePolling";
+import { useSpecEdit } from "../composables/useSpecEdit";
 import DeckViewer from "./DeckViewer.vue";
 import {
   X,
@@ -308,6 +309,30 @@ const deckSpec = ref<any | null>(null);
 const deckSpecPath = ref<string | null>(null);
 const deckKey = ref<string>("");
 const deckPages = ref(0);
+// 导出目标 = 同目录**已有的那份 pptx**(模型做的、聊天里列为交付物的那个)。
+// 绝不能写死成「演示.pptx」—— 那会新建一个重复文件,而用户认识的那份纹丝不动,
+// 看起来就是「导出没保存」(真踩过)。没有已存在的 pptx 时才用 spec 同名兜底。
+const deckPptxPath = ref<string | null>(null);
+// 【必须声明在下面那个 immediate watch 之前】它在 setup 期就同步跑并会写这两个 ref;
+// 声明在后 = TDZ「Cannot access before initialization」,整个抽屉被错误边界吞掉(真踩过)。
+const deckExported = ref<string | null>(null); // 刚导出的文件名(回执)
+const deckExporting = ref(false);
+const deckError = ref<string | null>(null);
+async function resolvePptxTarget(specPath: string): Promise<string> {
+  const norm = (s: string) => s.replace(/\\/g, "/");
+  const np = norm(specPath);
+  const dir = np.slice(0, np.lastIndexOf("/") + 1);
+  try {
+    const list = await artifactsApi.list(app.currentConvId ?? undefined);
+    const sibs = list
+      .filter((e) => /\.pptx$/i.test(e.name) && norm(e.path).startsWith(dir))
+      .sort((a, b) => b.modified - a.modified);
+    if (sibs.length) return sibs[0].path;
+  } catch {
+    /* 列不出来就走兜底名 */
+  }
+  return specPath.replace(/polaris\.slides\.json$/i, "课件.pptx");
+}
 const deckGenerating = computed(() => chat.isSending(app.currentConvId ?? null));
 // 生成中且还没有可渲染的页:用等待态盖住 loading/error(spec 未落盘时 read 必然报错)
 const deckPending = computed(
@@ -335,10 +360,16 @@ watch(
     deckSpecPath.value = null;
     deckKey.value = "";
     deckPages.value = 0;
+    deckPptxPath.value = null;
+    deckExported.value = null;
     if (!p) return;
     if (/^polaris\.slides\.json$/i.test(p.name) && p.text) {
       await buildDeck(p.text, p.path, p);
+      // 正看 spec:导出目标 = 同目录已有的那份 pptx
+      if (artifacts.payload === p) deckPptxPath.value = await resolvePptxTarget(p.path);
     } else if (/\.pptx$/i.test(p.name) && sib) {
+      // 正看 pptx 本身:它就是导出目标(覆盖自己)
+      deckPptxPath.value = p.path;
       try {
         const r = await artifactsApi.read(sib);
         if (artifacts.payload !== p) return; // 竞态:读盘期间已切走
@@ -390,17 +421,48 @@ watch(
     }
   }
 );
-const deckExporting = ref(false);
-const deckError = ref<string | null>(null);
-// 用户主动导出 = 无条件重转(不做 mtime 短路),转完在资源管理器里定位成品
+// 所有对 spec 的改动共用一个事务(与演示工坊同一个 composable):
+// 读盘 → 改对象 → 写盘 → 刷预览 → 重转 pptx,并自动记撤销栈。
+const specEdit = useSpecEdit({
+  specPath: () => deckSpecPath.value,
+  pptxTarget: async (sp) => {
+    const out = deckPptxPath.value ?? (await resolvePptxTarget(sp));
+    deckPptxPath.value = out;
+    return out;
+  },
+  onWritten: (text, sp) => buildDeck(text, sp, artifacts.payload), // 立刻按新内容重排
+  onError: (m) => (deckError.value = m),
+});
+// 点字直改:autofit 会按新内容重算字号,所以用户改不坏排版。
+function onDeckEdit(slideIdx: number, path: string, value: string) {
+  deckError.value = null;
+  void specEdit.mutate((obj) => {
+    if (!obj?.slides?.[slideIdx]) throw new Error("spec 结构不符");
+    return setSpecText(obj.slides[slideIdx], path, value); // 没改动/路径不符:静默跳过
+  });
+}
+// 页面级操作:加页/删页/复制/重排/备注 —— 纯 spec 变换,每页仍各自 autofit。
+function onDeckOp(op: SlideOp) {
+  deckError.value = null;
+  void specEdit.mutate((obj) => applySlideOp(obj, op));
+}
+// 换了 spec 文件:旧撤销栈会把上一份的内容写进新文件 —— 必须清。
+// (这个 watch 只能待在 specEdit 声明之后:上面那些 immediate watch 在 setup 期就同步跑,
+//  引用尚未初始化的 const 会 TDZ 报错、整个抽屉被错误边界吞掉 —— 同文件已踩过一次。)
+watch(deckSpecPath, () => specEdit.resetHistory());
+// 用户主动导出 = 无条件重转(不做 mtime 短路),**覆盖用户认识的那份 pptx**,
+// 转完在资源管理器里选中它 —— 让「导出」这个词兑现:他看得见文件真的更新了。
 async function exportDeckPptx() {
   const sp = deckSpecPath.value;
   if (!sp || deckExporting.value) return;
   deckExporting.value = true;
   deckError.value = null;
+  deckExported.value = null;
   try {
-    const out = sp.replace(/polaris\.slides\.json$/i, "演示.pptx");
+    const out = deckPptxPath.value ?? (await resolvePptxTarget(sp));
     await artifactsApi.specToPptx(sp, out);
+    deckPptxPath.value = out;
+    deckExported.value = out.replace(/\\/g, "/").split("/").pop() ?? "";
     await artifactsApi.reveal(out);
   } catch (e: any) {
     deckError.value = `导出 PPTX 失败：${e?.message ?? e}`;
@@ -634,9 +696,20 @@ function fmtSize(n: number): string {
               <span v-if="deckGenerating" class="pv-deck-live">
                 <Loader :size="12" :stroke-width="1.8" class="spin" /> 生成中 · 已出 {{ deckPages }} 页
               </span>
+              <!-- 导出回执:明说存成了哪个文件 —— 否则用户以为「没保存」(真踩过) -->
+              <span v-else-if="deckExported" class="pv-deck-ok">已保存到 {{ deckExported }}</span>
               <span v-else class="pv-deck-hint">原生可编辑 · 预览即导出</span>
             </div>
-            <DeckViewer class="pv-deck-viewer" :spec="deckSpec" :generating="deckGenerating" />
+            <DeckViewer
+              class="pv-deck-viewer"
+              :spec="deckSpec"
+              :generating="deckGenerating"
+              :editable="!deckGenerating"
+              :can-undo="specEdit.canUndo.value"
+              @edit="onDeckEdit"
+              @op="onDeckOp"
+              @undo="specEdit.undo()"
+            />
           </div>
           <!-- HTML / SVG → iframe 完整渲染 -->
           <iframe
@@ -1069,6 +1142,11 @@ function fmtSize(n: number): string {
   font-size: 11.5px;
   font-weight: 600;
   color: var(--primary-deep, var(--primary));
+}
+.pv-deck-ok {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ok, #2f7a4f);
 }
 .pv-deck-err {
   padding: 6px 10px;

@@ -236,13 +236,23 @@ async fn run_check(app: &AppHandle) -> UpdaterState {
 /// 用 R2 而非 Pages：Pages 单文件上限 25MiB，而本项目装包 win ~119MB / mac ~235MB
 /// （带了 voice-live 的 sherpa + onnxruntime），差一个数量级，Pages 根本传不上去。
 ///
-/// r2.dev 是 Cloudflare 给测试用的公共域、带限流，但**限流命中时客户端会自动切下一个源**
-/// （最坏退回 github 镜像，即没有自托管时的水平），故可接受；要更稳可给桶绑自定义域，
-/// 只需改下面这个常量。
+/// **本仓是 private**，所以 latest.json 里那个 github url 匿名下载必然 404——
+/// 下面 gh-proxy / ghfast / 直连三个候选今天全是死的，真正能下到包的只有自托管这一跳。
+/// 保留它们是因为：① mirror_candidates 要靠 github url 剥出文件名；
+/// ② 仓库哪天转 public，它们立刻变回真兜底。**别把自托管当成可选项**，它是唯一的活源。
+///
+/// 自托管给两个候选，都指向同一个 R2 桶（teacher-agent-dist）：
+/// - 首位自定义域 teacher-dl.llmwiki.cloud：r2.dev 是 Cloudflare 的测试域、明确带限流且不建议生产用；
+/// - 次位 r2.dev：v1.0.2 及更早的客户端把它写死在 endpoints 里，桶必须继续对它供包；
+///   同时它也兜自定义域证书/DNS 出问题的情况。
+/// 两者同桶，桶挂了都完蛋——但那时 github 也救不了（private），所以可用性上限就是 R2。
 ///
 /// latest.json 里的 url 始终写 github 地址（两个分发渠道共用同一份 latest.json），
-/// 自托管这一跳由这里按文件名拼出来、而非写死进 latest.json——这样 R2 掉线仍能回落 github。
-const SELF_HOST_BASE: &str = "https://pub-667c9f15cb424a8db14d7b4ef7bbb481.r2.dev/downloads";
+/// 自托管这一跳由这里按文件名拼出来、而非写死进 latest.json。
+const SELF_HOST_BASE: &str = "https://teacher-dl.llmwiki.cloud/downloads";
+
+/// 老客户端写死的自托管域，同桶。见 SELF_HOST_BASE 注释。
+const SELF_HOST_FALLBACK: &str = "https://pub-667c9f15cb424a8db14d7b4ef7bbb481.r2.dev/downloads";
 
 fn mirror_candidates(url: &str) -> Vec<String> {
     // latest.json 里的 url 可能本身已是 `https://<镜像>/https://github.com/...`，
@@ -255,6 +265,7 @@ fn mirror_candidates(url: &str) -> Vec<String> {
     let mut out = Vec::new();
     if !filename.is_empty() {
         out.push(format!("{SELF_HOST_BASE}/{filename}"));
+        out.push(format!("{SELF_HOST_FALLBACK}/{filename}"));
     }
     out.push(format!("https://gh-proxy.com/{bare}"));
     out.push(format!("https://ghfast.top/{bare}"));
@@ -548,18 +559,22 @@ mod tests {
         let c = mirror_candidates(
             "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.2/TeacherAgent_1.0.2_x64-setup.exe",
         );
-        // 自托管 / gh-proxy / ghfast / 直连 共 4 个候选源。
-        assert_eq!(c.len(), 4);
-        // 自托管排第一（国内可达性最好），按文件名取。
+        // 自托管×2（自定义域 + r2.dev）/ gh-proxy / ghfast / 直连 共 5 个候选源。
+        assert_eq!(c.len(), 5);
+        // 自托管排前两位（private 仓下这是仅有的活源），按文件名取。
         assert_eq!(
             c[0],
             format!("{SELF_HOST_BASE}/TeacherAgent_1.0.2_x64-setup.exe")
         );
-        assert!(c[1].starts_with("https://gh-proxy.com/https://github.com/"));
-        assert!(c[2].starts_with("https://ghfast.top/https://github.com/"));
+        assert_eq!(
+            c[1],
+            format!("{SELF_HOST_FALLBACK}/TeacherAgent_1.0.2_x64-setup.exe")
+        );
+        assert!(c[2].starts_with("https://gh-proxy.com/https://github.com/"));
+        assert!(c[3].starts_with("https://ghfast.top/https://github.com/"));
         // 末位是直连兜底（无镜像前缀）。
         assert_eq!(
-            c[3],
+            c[4],
             "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.2/TeacherAgent_1.0.2_x64-setup.exe"
         );
     }
@@ -570,15 +585,19 @@ mod tests {
         let c = mirror_candidates(
             "https://gh-proxy.com/https://github.com/wuli2025/teacher-agent/releases/download/v1.0.2/TeacherAgent.app.tar.gz",
         );
-        assert_eq!(c.len(), 4);
-        // 自托管（首位）按文件名，不带版本路径前缀。
+        assert_eq!(c.len(), 5);
+        // 自托管（前两位）按文件名，不带版本路径前缀。
         assert_eq!(c[0], format!("{SELF_HOST_BASE}/TeacherAgent.app.tar.gz"));
         assert_eq!(
-            c[3],
+            c[1],
+            format!("{SELF_HOST_FALLBACK}/TeacherAgent.app.tar.gz")
+        );
+        assert_eq!(
+            c[4],
             "https://github.com/wuli2025/teacher-agent/releases/download/v1.0.2/TeacherAgent.app.tar.gz"
         );
         // 不出现双重镜像前缀。
-        assert!(!c[1].contains("gh-proxy.com/https://gh-proxy.com"));
+        assert!(!c[2].contains("gh-proxy.com/https://gh-proxy.com"));
     }
 
     #[test]

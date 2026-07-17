@@ -15,6 +15,7 @@ import {
   Archive,
   Puzzle,
   Sparkles,
+  BookOpen,
 } from "@lucide/vue";
 import SearchGlass from "./icons/SearchGlass.vue";
 import { useAppStore } from "../stores/app";
@@ -176,7 +177,7 @@ const sortedConvs = computed<Conversation[]>(() => {
       <span v-if="!app.sidebarCollapsed">新建对话</span>
     </button>
 
-    <!-- Nav：三大功能（AI课件PPT / AI教案 / 生成数学课件） -->
+    <!-- Nav：三大功能（AI课件PPT / AI教案 / 生成数学课件）+ 知识库 -->
     <nav class="nav">
       <button
         v-for="it in functionItems"
@@ -190,6 +191,18 @@ const sortedConvs = computed<Conversation[]>(() => {
           ><component :is="it.icon" :size="19" :stroke-width="1.7"
         /></span>
         <span v-if="!app.sidebarCollapsed" class="label">{{ it.label }}</span>
+      </button>
+
+      <button
+        class="nav-item fn"
+        :class="{ active: app.view === 'wiki' }"
+        title="知识库"
+        @click="pickNav('wiki')"
+      >
+        <span class="glyph-icon"
+          ><BookOpen :size="19" :stroke-width="1.7"
+        /></span>
+        <span v-if="!app.sidebarCollapsed" class="label">知识库</span>
       </button>
 
       <!-- 更多：技能中心 / 环境 / 设置 等次要项收纳于此（顶层更清爽） -->
@@ -520,13 +533,13 @@ const sortedConvs = computed<Conversation[]>(() => {
   justify-content: space-between;
   padding: 0 10px 10px;
 }
-/* 「历史任务」是左栏第二主角，撑到与三大功能同一视觉重量 */
+/* 「历史任务」是分区标签，不是第二主角：与功能栏同一无衬线字族，字号降一档、字距收敛，
+   让视觉重量落在下面的对话行上（原来衬线 + 1.5px 字距与上方功能栏割裂） */
 .proj-title {
-  font-family: var(--serif);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 1.5px;
-  color: var(--text-2);
+  letter-spacing: 0.5px;
+  color: var(--muted);
 }
 /* 团队项目分区(GitHub repo 列表式) */
 .team-sec-head {
@@ -906,14 +919,14 @@ const sortedConvs = computed<Conversation[]>(() => {
 .conv:hover .cv-time {
   display: none;
 }
-/* 对话 = 实体（仿 Codex）：更醒目、可点的主条目，颜色加深、字号略大 */
+/* 对话 = 实体（仿 Codex）：可点的主条目。字号/圆角对齐上方功能栏的 .nav-item.sub，同一套节奏 */
 .conv {
   position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 10px 10px 14px;
-  font-size: 14.5px;
+  padding: 9px 10px 9px 12px;
+  font-size: 14px;
   color: var(--text-2);
   border-radius: 9px;
   cursor: pointer;
@@ -933,9 +946,10 @@ const sortedConvs = computed<Conversation[]>(() => {
 .conv:hover .ca.delete {
   display: inline-flex;
 }
+/* 选中态与功能栏同源（主色淡底 + 主色字），不再是另一套灰底 */
 .conv.active {
-  background: var(--selection-bg-hover);
-  color: var(--text);
+  background: color-mix(in srgb, var(--primary, #3f6ef0) 12%, transparent);
+  color: var(--primary, #3f6ef0);
   font-weight: 600;
 }
 .cv-dot {

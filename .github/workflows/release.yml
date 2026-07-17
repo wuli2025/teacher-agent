@@ -232,21 +232,24 @@ jobs:
           make_latest: true
           files: dist/*
 
-      # latest.json 里的 url 必须真能下到东西。v1.0.1 栽在这:CI 全绿、Release 建好、
-      # latest.json 格式完美,但 url 写的是被 GitHub 剥掉中文前的原名 → 全部 404,
-      # 自动更新对所有用户静默失效。格式对 ≠ 能下,这里按真实 HTTP 结果卡。
-      - name: Verify download urls resolve
+      # latest.json 里 url 的文件名必须和 dist 里真实的包对得上。v1.0.1 栽在这:CI 全绿、
+      # Release 建好、latest.json 格式完美,但 url 写的是被 GitHub 剥掉中文前的原名 → 全部 404。
+      #
+      # 这里**不**再 curl github url:本仓是 private,匿名请求必然 404,曾让 v1.0.2 的
+      # 这一步红着收场(包其实都传对了)。github url 在 private 期间只是「文件名载体」,
+      # 客户端靠 updater.rs::mirror_candidates 从中剥出文件名去自托管源下载。
+      # 真正的下载可达性由下面「Verify self-hosted endpoint」按真实 HTTP 结果卡。
+      - name: Verify latest.json filenames match artifacts
         shell: bash
         run: |
           set -euo pipefail
           urls=$(python3 -c 'import json;d=json.load(open("dist/latest.json"));[print(p["url"]) for p in d["platforms"].values()]' | sort -u)
           fail=0
           for u in $urls; do
-            # -L 跟随 GitHub 的 302 到实际存储;-I 只取头,不拉 100MB+ 的包。
-            code=$(curl -sIL -o /dev/null -w '%{http_code}' "$u" || echo 000)
-            if [ "$code" = "200" ]; then echo "✓ $code $u"; else echo "✗ $code $u"; fail=1; fi
+            f="${u##*/}"
+            if [ -f "dist/$f" ]; then echo "✓ $f"; else echo "✗ latest.json 指向 $f,但 dist 里没有"; fail=1; fi
           done
-          [ "$fail" = "0" ] || { echo "::error::latest.json 里有下载地址不可达,自动更新会失效"; exit 1; }
+          [ "$fail" = "0" ] || { echo "::error::latest.json 的文件名与产物对不上,自动更新会 404"; exit 1; }
 
       # ── 自托管分发（Cloudflare R2）─────────────────────────────
       # 客户端 endpoints 第一顺位是 R2 上的 downloads/latest.json,
@@ -259,7 +262,9 @@ jobs:
       # 因此 R2 掉线/限流时客户端仍能自动回落 github,不会把自己锁死在单一渠道。
       #
       # 需在仓库 Secrets 配 CLOUDFLARE_API_TOKEN(Object Read & Write) 与 CLOUDFLARE_ACCOUNT_ID。
-      # 没配则跳过(GitHub 渠道照常可用),不让发版整体失败。
+      # **没配就必须让发版失败**:本仓 private,github 那几个候选源匿名下载全是 404,
+      # 自托管是客户端唯一能下到包的源。以前这里只 warning 就放过,结果 v1.0.2 发出去时
+      # R2 一个字节都没传,用户端「检查更新失败」,而 CI 看着是绿的。宁可红在这里。
       - name: Upload to Cloudflare R2
         id: r2
         shell: bash
@@ -269,9 +274,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
-            echo "::warning::未配 CLOUDFLARE_API_TOKEN/ACCOUNT_ID,跳过自托管分发(客户端会回落 github 镜像)。补发见 scripts/publish-r2.ps1"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error::未配 CLOUDFLARE_API_TOKEN/ACCOUNT_ID。private 仓下自托管是唯一活源,不能跳过。补发见 scripts/publish-r2.ps1"
+            exit 1
           fi
           # latest.json 最后传:装包先就位,避免「latest.json 已指新版、包还没上去」的空窗期。
           for f in $(ls dist | grep -v '^latest.json$'); do
@@ -281,30 +285,31 @@ jobs:
           done
           npx --yes wrangler@4 r2 object put "teacher-agent-dist/downloads/latest.json" \
             --file dist/latest.json --content-type application/json --remote
-          echo "skip=false" >> "$GITHUB_OUTPUT"
 
-      # 自托管源是第一顺位,必须实测拿到的是 JSON 且版本号对得上,而不是只看 HTTP 200。
+      # 自托管是 private 仓下唯一的活源,必须实测拿到的是 JSON 且版本号对得上,而不是只看 HTTP 200。
+      # 两个域都验:自定义域给 v1.0.3+,r2.dev 给 v1.0.2 及更早那批写死它的老客户端。同一个桶。
       - name: Verify self-hosted endpoint
-        if: steps.r2.outputs.skip == 'false'
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          BASE="https://pub-667c9f15cb424a8db14d7b4ef7bbb481.r2.dev/downloads"
-          for i in 1 2 3 4 5; do
-            got=$(curl -fsSL "$BASE/latest.json" | python3 -c \
-              'import sys,json; print(json.load(sys.stdin)["version"])' 2>/dev/null) || got=""
-            if [ "$got" = "$VERSION" ]; then
-              echo "自托管 latest.json 已就绪: $got"
-              # 装包也得真在:客户端第一顺位就是从这里拉包,404 会白耗一次重试。
-              for f in $(ls dist | grep -v '^latest.json$'); do
-                code=$(curl -sI -o /dev/null -w '%{http_code}' "$BASE/$f" || echo 000)
-                [ "$code" = "200" ] && echo "✓ $code $f" || { echo "::error::自托管缺包: $code $f"; exit 1; }
-              done
-              exit 0
-            fi
-            echo "第 $i 次:拿到 '$got',期望 '$VERSION',10s 后重试(边缘生效有延迟)"
-            sleep 10
+          fail=0
+          for BASE in "https://teacher-dl.llmwiki.cloud/downloads" \
+                      "https://pub-667c9f15cb424a8db14d7b4ef7bbb481.r2.dev/downloads"; do
+            echo "── $BASE"
+            ok=0
+            for i in 1 2 3 4 5; do
+              got=$(curl -fsSL "$BASE/latest.json" | python3 -c \
+                'import sys,json; print(json.load(sys.stdin)["version"])' 2>/dev/null) || got=""
+              if [ "$got" = "$VERSION" ]; then echo "  latest.json 已就绪: $got"; ok=1; break; fi
+              echo "  第 $i 次:拿到 '$got',期望 '$VERSION',10s 后重试(边缘生效有延迟)"
+              sleep 10
+            done
+            [ "$ok" = "1" ] || { echo "::error::$BASE 的 latest.json 未同步到 $VERSION"; fail=1; continue; }
+            # 装包也得真在:客户端就是从这里拉包,404 会白耗一次重试。
+            for f in $(ls dist | grep -v '^latest.json$'); do
+              code=$(curl -sI -o /dev/null -w '%{http_code}' "$BASE/$f" || echo 000)
+              [ "$code" = "200" ] && echo "  ✓ $code $f" || { echo "::error::自托管缺包: $code $BASE/$f"; fail=1; }
+            done
           done
-          echo "::error::自托管 latest.json 未同步到 $VERSION"
-          exit 1
+          [ "$fail" = "0" ] || exit 1

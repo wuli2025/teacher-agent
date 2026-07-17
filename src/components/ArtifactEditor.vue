@@ -15,7 +15,7 @@ import {
   MousePointer2, RotateCw, Type, Square, Circle, Image as ImageIcon, SendToBack,
   Undo2, Redo2, Strikethrough, List, ListOrdered, Link2, Highlighter,
   RemoveFormatting, FileText, Heading1, Heading2, Heading3, TextQuote,
-  Table, Search,
+  Table, Search, ListTree, ImagePlus,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
@@ -1894,6 +1894,57 @@ function mdInsertBlock(text: string) {
 function mdInsertTable() {
   mdInsertBlock("\n| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n| 内容 | 内容 | 内容 |\n");
 }
+/** 图片：Markdown 里直接插引用（图片本体由用户自己放进产物目录） */
+function mdInsertImage() {
+  mdInsertBlock("\n![图片说明](图片文件名.png)\n");
+}
+/** 分割线 */
+function mdInsertHr() {
+  mdInsertBlock("\n---\n");
+}
+
+// ───────── 文章大纲 + 字数（长文写作的两个刚需）─────────
+// 大纲从正文的 ATX 标题现算：无需另存结构，改标题即刻同步。```代码块```里的 # 是注释
+// 不是标题，必须跳过，否则一段 shell 示例能凭空造出十几条假大纲。
+const outline = computed(() => {
+  if (docKind.value !== "markdown") return [];
+  const rows: { level: number; text: string; pos: number }[] = [];
+  let pos = 0;
+  let inFence = false;
+  for (const line of html.value.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
+    else if (!inFence) {
+      const m = /^(#{1,4})\s+(.+?)\s*#*\s*$/.exec(line);
+      if (m) rows.push({ level: m[1].length, text: m[2], pos });
+    }
+    pos += line.length + 1;
+  }
+  return rows;
+});
+const outlineOpen = ref(false);
+/** 点大纲跳转：光标落到该标题并把它滚到视野中间 */
+function gotoOutline(pos: number) {
+  const ta = docTa.value;
+  if (!ta) return;
+  outlineOpen.value = false;
+  ta.focus();
+  ta.setSelectionRange(pos, pos);
+  // 按「第几行 × 行高」估算滚动位置：textarea 没有量单行位置的 API，
+  // 而 Markdown 正文行高一致，估算足够准（差半行不影响找位置）。
+  const line = ta.value.slice(0, pos).split("\n").length - 1;
+  const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+  ta.scrollTop = Math.max(0, line * lh - ta.clientHeight / 2);
+  onDocTaScroll(); // 预览跟着走
+}
+/** 字数：中文按字算、西文按词算（纯 length 对中文虚高、对英文虚低，两边都不准） */
+const docStats = computed(() => {
+  const t = html.value;
+  const cjk = (t.match(/[一-鿿㐀-䶿]/g) ?? []).length;
+  const words = (t.match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g) ?? []).length;
+  const total = cjk + words;
+  return { total, chars: t.length, lines: t ? t.split("\n").length : 0, mins: Math.max(1, Math.round(total / 300)) };
+});
+
 /** Tab 缩进两空格（否则 Tab 会把焦点带走） */
 function onDocTaKey(e: KeyboardEvent) {
   if (e.key !== "Tab") return;
@@ -2303,10 +2354,36 @@ watch(
         <span class="ed-fmt-sep" />
         <button class="ed-ic" title="插入链接" @click="mdWrap('[', '](https://)', '链接文字')"><Link2 :size="14" /></button>
         <button class="ed-ic" title="插入表格" @click="mdInsertTable"><Table :size="14" /></button>
+        <button class="ed-ic" title="插入图片" @click="mdInsertImage"><ImagePlus :size="14" /></button>
+        <button class="ed-ic" title="插入分割线" @click="mdInsertHr"><Minus :size="14" /></button>
+        <span class="ed-fmt-sep" />
+        <!-- 大纲：长文里靠它跳章节，比滚动条快得多 -->
+        <div class="ed-outline-wrap">
+          <button class="ed-ic" :class="{ on: outlineOpen }" title="文章大纲（点标题跳转）" @click="outlineOpen = !outlineOpen">
+            <ListTree :size="14" />
+          </button>
+          <div v-if="outlineOpen" class="ed-outline">
+            <button
+              v-for="(o, i) in outline"
+              :key="i"
+              class="ed-outline-row"
+              :style="{ paddingLeft: 8 + (o.level - 1) * 12 + 'px' }"
+              :title="o.text"
+              @click="gotoOutline(o.pos)"
+            >
+              <span class="ed-outline-h">H{{ o.level }}</span>{{ o.text }}
+            </button>
+            <div v-if="!outline.length" class="ed-outline-empty">正文里还没有 # 标题</div>
+          </div>
+        </div>
         <span class="ed-fmt-sep" />
       </template>
       <button class="ed-ic" title="查找替换 (Ctrl+F)" @click="openFind"><Search :size="14" /></button>
       <span class="ed-fmt-tip">{{ docKind === "markdown" ? "选中文字后点按钮加格式 · 左右同步滚动" : "Ctrl+F 查找替换 · Ctrl+S 保存" }}</span>
+      <!-- 字数：中文按字、西文按词,约 300 字/分钟估朗读时长(讲稿场景要的就是这个) -->
+      <span class="ed-fmt-stats" :title="`${docStats.chars} 个字符 · ${docStats.lines} 行 · 朗读约 ${docStats.mins} 分钟`">
+        {{ docStats.total }} 字 · {{ docStats.mins }} 分钟
+      </span>
     </div>
 
     <!-- 查找替换条（源码 / Markdown / 纯文本） -->
@@ -2806,6 +2883,15 @@ watch(
 .ed-fmt-color::after { content: ""; width: 14px; height: 3px; border-radius: 2px; background: currentColor; opacity: .5; }
 .ed-fmt-color input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .ed-fmt-tip { margin-left: auto; font-size: 11px; color: var(--dim); }
+/* 字数/朗读时长:贴在工具条最右,始终可见但不抢眼 */
+.ed-fmt-stats { margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--border-soft); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; cursor: default; }
+/* 大纲浮层:从标题按钮下方掉出来,点一条即跳 */
+.ed-outline-wrap { position: relative; display: inline-flex; }
+.ed-outline { position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; width: 250px; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18); }
+.ed-outline-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border: none; border-radius: 5px; background: transparent; color: var(--text-2); font-size: 12px; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ed-outline-row:hover { background: var(--primary-soft); color: var(--primary-deep); }
+.ed-outline-h { font-size: 9px; font-weight: 700; color: var(--dim); flex-shrink: 0; }
+.ed-outline-empty { padding: 10px 8px; font-size: 11px; color: var(--muted); }
 
 /* 查找替换条 */
 .ed-find { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-bottom: 1px solid var(--border-soft); background: var(--bg-soft); }

@@ -82,3 +82,6 @@ docker/relay/certs/
 
 # 误装进来的 polaris-app 安装副本(Windows 二进制,非源码,勿入库)
 llmwiki/Polaris/
+
+# wrangler 的本地模拟存储(r2 object put 不加 --remote 时写这里,别当成真上传了)
+.wrangler/

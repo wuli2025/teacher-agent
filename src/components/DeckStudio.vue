@@ -22,7 +22,11 @@ import { useChatStore } from "../stores/chat";
 import { artifacts as artifactsApi, chat as chatApi, skills as skillsApi, type AttachedFile, type Skill } from "../tauri";
 import { useFileDrop } from "../composables/useFileDrop";
 import { groupedThemes, findTheme, type DeckTheme } from "../lib/deckThemes";
-import { parseSpecLoose, NATIVE_THEME_META, type SlideSpec } from "../lib/slidesSpec";
+import {
+  parseSpecLoose, setSpecText, applySlideOp, NATIVE_THEME_META,
+  type SlideSpec, type SlideOp,
+} from "../lib/slidesSpec";
+import { useSpecEdit } from "../composables/useSpecEdit";
 import { resolveSpecImages } from "../lib/specImages";
 import DeckViewer from "./DeckViewer.vue";
 
@@ -273,6 +277,7 @@ async function start() {
     }
     lastAction.value = "create";
     phase.value = "generating";
+    specEdit.resetHistory(); // 新一份 spec:旧撤销栈作废
     const display = `PPT·${curTheme.value.name}：${preview()}`;
     await chat.send(id, buildPrompt(), display, undefined, {
       permissionMode: "auto_current",
@@ -315,6 +320,7 @@ function reset() {
   reviseText.value = "";
   specPages.value = 0;
   specTheme.value = "";
+  specEdit.resetHistory(); // 换了一份 spec:旧撤销栈会把上一份的内容写回来
 }
 
 // ───────── 产物 + 实时预览 ─────────
@@ -402,6 +408,14 @@ async function loadPreview() {
   }
 }
 
+// 导出/转换目标 = 同目录**已有的那份 pptx**(模型做的、聊天里列为交付物的那个)。
+// 绝不能写死成「演示.pptx」—— 那会新建一个重复文件,而用户认识的那份纹丝不动,
+// 看起来就是「导出没保存」(真踩过)。没有已存在的 pptx 时才用兜底名。
+function pptxTarget(specPath: string): string {
+  const hit = outputs.value.find((o) => /\.pptx$/i.test(o.name));
+  return hit ? hit.path : specPath.replace(/polaris\.slides\.json$/i, "课件.pptx");
+}
+
 // 兜底转换:模型只写了 spec(CLI 不在/没跑成)→ 桌面端自己调原生引擎出 .pptx。
 // 「继续修改」只改 spec 不重转 pptx 是常态 → 按 mtime 判旧:pptx 比 spec 旧就重转,
 // 否则用户拿到的导出永远停在第一版。
@@ -412,8 +426,7 @@ async function ensureSpecConverted() {
   const pptx = outputs.value.find((o) => /\.pptx$/i.test(o.name));
   if (pptx && pptx.modified >= spec.modified) return;
   try {
-    const out = spec.path.replace(/polaris\.slides\.json$/i, "演示.pptx");
-    await artifactsApi.specToPptx(spec.path, out);
+    await artifactsApi.specToPptx(spec.path, pptxTarget(spec.path));
     await loadOutputs();
   } catch (e: any) {
     error.value = `spec → PPT 转换失败：${e?.message ?? e}`;
@@ -431,16 +444,20 @@ watch(sending, async (now, before) => {
 // ───────── 完成态动作:导出 / 换肤 ─────────
 const specOut = computed(() => outputs.value.find((o) => /polaris\.slides\.json$/i.test(o.name)));
 const exporting = ref(false);
-// 用户主动点「导出」= 无条件重转(mtime 短路只给轮询兜底用,主动导出必须拿到最新内容)
+const exported = ref<string | null>(null); // 刚导出的文件名(回执,明说存到哪)
+// 用户主动点「导出」= 无条件重转(mtime 短路只给轮询兜底用,主动导出必须拿到最新内容),
+// **覆盖用户认识的那份 pptx** 并在资源管理器里选中它 —— 让「导出」这个词兑现。
 async function exportPptx() {
   const spec = specOut.value;
   if (!spec || exporting.value) return;
   exporting.value = true;
   error.value = null;
+  exported.value = null;
   try {
-    const out = spec.path.replace(/polaris\.slides\.json$/i, "演示.pptx");
+    const out = pptxTarget(spec.path);
     await artifactsApi.specToPptx(spec.path, out);
     await loadOutputs();
+    exported.value = out.replace(/\\/g, "/").split("/").pop() ?? "";
     await artifactsApi.reveal(out); // 在资源管理器里定位成品
   } catch (e: any) {
     error.value = `导出 PPTX 失败：${e?.message ?? e}`;
@@ -448,29 +465,43 @@ async function exportPptx() {
     exporting.value = false;
   }
 }
+// 所有对 spec 的改动(改字/页面增删重排/备注/换肤)共用一个事务:
+// 读盘 → 改对象 → 写盘 → 刷预览 → 重转 pptx,并自动记撤销栈。
+const specEdit = useSpecEdit({
+  specPath: () => specOut.value?.path ?? null,
+  pptxTarget: (p) => pptxTarget(p),
+  // spec 文本变了 → previewKey 失配 → 播放器按新内容重排;再拉一次列表让 mtime 跟上
+  onWritten: () => loadOutputs(),
+  onError: (m) => (error.value = m),
+});
+
+// 点字直改:只改文字不动版式。autofit 会按新内容重算字号,所以用户改不坏排版。
+function onDeckEdit(slideIdx: number, path: string, value: string) {
+  error.value = null;
+  void specEdit.mutate((obj) => {
+    if (!obj?.slides?.[slideIdx]) throw new Error("spec 结构不符");
+    return setSpecText(obj.slides[slideIdx], path, value); // 没改动/路径不符:静默跳过
+  });
+}
+// 页面级操作:加页/删页/复制/重排/备注 —— 纯 spec 变换,每页仍各自 autofit。
+function onDeckOp(op: SlideOp) {
+  error.value = null;
+  void specEdit.mutate((obj) => applySlideOp(obj, op));
+}
+
 // 换肤不重新生成:spec.theme 是引擎/预览共用的色板 id,本地改字段→预览秒变→后台重转 pptx。
 // 内容一字不动 —— 这正是「版式态」的红利(豆包没有重排引擎,我们有)。
 const skinning = ref<string | null>(null);
 async function applyTheme(id: string) {
-  const spec = specOut.value;
-  if (!spec || skinning.value || phase.value === "generating") return;
+  if (!specOut.value || skinning.value || phase.value === "generating") return;
   skinning.value = id;
   error.value = null;
-  try {
-    const p = await artifactsApi.read(spec.path);
-    const obj = JSON.parse(p?.text ?? "");
-    if (!obj || !Array.isArray(obj.slides)) throw new Error("spec 尚未就绪");
+  await specEdit.mutate((obj) => {
+    if (obj.theme === id) return false;
     obj.theme = id;
-    await artifactsApi.write(spec.path, JSON.stringify(obj, null, 2));
-    await loadOutputs(); // spec 文本变了 → previewKey 失配 → 播放器即时换色
-    const out = spec.path.replace(/polaris\.slides\.json$/i, "演示.pptx");
-    await artifactsApi.specToPptx(spec.path, out); // 后台同步重转,导出物与预览不脱节
-    await loadOutputs();
-  } catch (e: any) {
-    error.value = `换肤失败：${e?.message ?? e}`;
-  } finally {
-    skinning.value = null;
-  }
+    return true;
+  });
+  skinning.value = null;
 }
 
 // 共享轮询:页面隐藏自动暂停、回前台立即补拉、卸载自动清理。3s——逐页点亮的跟手感。
@@ -675,6 +706,8 @@ function fillDemo() {
                 <Loader v-if="exporting" :size="14" class="spin" /><FileType2 v-else :size="14" />
                 {{ exporting ? "导出中…" : "导出 PPTX" }}
               </button>
+              <!-- 导出回执:明说存成了哪个文件 —— 否则用户以为「没保存」(真踩过) -->
+              <span v-if="exported" class="dk-exported">已保存到 {{ exported }}</span>
               <button class="dk-ghost" @click="openDir"><FolderOpen :size="12" /> 目录</button>
               <div class="dk-skin">
                 <span class="dk-skin-lab">换肤</span>
@@ -700,6 +733,11 @@ function fillDemo() {
               class="dk-viewer"
               :spec="previewSpec"
               :generating="phase === 'generating'"
+              :editable="phase === 'done'"
+              :can-undo="specEdit.canUndo.value"
+              @edit="onDeckEdit"
+              @op="onDeckOp"
+              @undo="specEdit.undo()"
             />
             <!-- 网页PPT:自包含 html 喂 iframe。安全: 只给 allow-scripts,绝不加
                  allow-same-origin —— 二者并存会让 srcdoc 内 AI 生成的脚本自拆沙箱、
@@ -840,6 +878,7 @@ function fillDemo() {
 
 /* 完成态工具栏:导出 + 换肤 */
 .dk-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dk-exported { font-size: 11.5px; font-weight: 600; color: var(--ok, #2f7a4f); }
 .dk-skin { margin-left: auto; display: flex; align-items: center; gap: 5px; }
 .dk-skin-lab { font-size: 11.5px; color: var(--muted); margin-right: 2px; }
 .dk-skin-sw { position: relative; width: 24px; height: 24px; border-radius: 6px; border: 1.5px solid var(--border); cursor: pointer; overflow: hidden; padding: 0; }
