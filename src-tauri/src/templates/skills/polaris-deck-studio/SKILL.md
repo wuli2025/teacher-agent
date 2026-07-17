@@ -1,7 +1,7 @@
 ---
 id: polaris-deck-studio
 name: Polaris 演示工坊（传统 PPT / 课件）
-description: 把教案、讲稿或任意文案做成**原生可编辑**的 .pptx。模型只出 spec(polaris.slides.json)决策版式与内容，Polaris 自带引擎确定性落 OOXML——真文本框、真形状，PowerPoint/WPS/Keynote 里 100% 可改。11 种固定版式 + `freeform` 自由版式（9 类盒子：文本/矩形/圆角卡/蒙版/图片/线条箭头/折线多边形/椭圆/标记点，可画坐标轴与受力图）、6 套色板、每页可带口播备注、freeform 盒子可加 `click` 做**单击逐步动画**（真 OOXML `<p:timing>`）；还想更自由可切 `engine:"python"` 走 python-pptx 桥。
+description: 把教案、讲稿或任意文案做成**原生可编辑**的 .pptx。模型只出 spec(polaris.slides.json)决策版式与内容，Polaris 自带引擎确定性落 OOXML——真文本框、真形状，PowerPoint/WPS/Keynote 里 100% 可改。11 种固定版式 + `freeform` 自由版式（11 类盒子：文本/矩形/圆角卡/蒙版/图片/**真表格**/**图表**(柱/折/饼/环)/线条箭头/折线多边形/椭圆/标记点，可画坐标轴与受力图）、6 套色板、每页可带口播备注；动画三件套：盒子 `click` 单击逐步显现、`anim` 富元素动画（飞入/擦除/脉冲等 13 种）、页级 `transition` 切换动画——全部是真 OOXML `<p:timing>`/`<p:transition>`。还想更自由可切 `engine:"python"` 走 python-pptx 桥。
 source: official
 author: Polaris
 created_at: 0
@@ -177,15 +177,17 @@ polaris.slides.json  →  polaris-forge spec-pptx  →  演示.pptx
    "image": "D:/课件/img/a.png", "cover": true, "rounded": true}
 ]}
 ```
-**盒子 `type` 一览（9 类，17 个取值）**——`|` 两侧是同义词，随便写哪个：
+**盒子 `type` 一览（11 类，19 个取值）**——`|` 两侧是同义词，随便写哪个：
 
 | type | 是什么 | 专属字段 |
 |---|---|---|
-| `text` | 文本框 | `text` 单行 **或** `lines` 多行数组；`size`（默认 18，范围 4–400）、`align`(`l`/`ctr`/`r`)、`anchor`(`t`/`ctr`/`b`)、`bold`、`italic` |
+| `text` | 文本框 | `text` 单行 **或** `lines` 多行数组；`size`（默认 18，范围 4–400）、`align`(`l`/`ctr`/`r`)、`anchor`(`t`/`ctr`/`b`)、`bold`、`italic`、`font`（`"serif"` 衬线，缺省黑体） |
 | `rect` \| `bar` | 实色矩形/色条 | `color`（默认 accent） |
 | `card` | 圆角卡片 | 无（配色随色板走） |
 | `scrim` | 半透明蒙版 | `color`（默认 `#000`）、`alpha` 0–100（默认 50） |
 | `image` \| `pic` | 真图片框 | `cover`（默认 true）、`rounded`（默认 false） |
+| `table` | **真表格**（PowerPoint 里可继续编辑的原生 `a:tbl`） | `rows` 行×列文本二维数组（如 `[["科目","课时"],["数学","6"]]`）；`header`（默认 true，首行做表头=强调色底）、`size` 单元格字号（默认 14）、`widths` 各列相对宽度（可选，如 `[2,1,1]`） |
+| `chart` | **形状化图表**（导出为可选中的形状组，数据不可在 PowerPoint 里改） | `chartType`：`bar`(柱状)/`line`(折线)/`pie`(饼)/`donut`(环形)；`labels` 类目数组；`series` 数据——单系列写 `[40,65,50]`，多系列写 `[[..],[..]]`；`names` 系列名（多系列时配图例）；`title` 图表标题（可选）。饼/环只用首系列，自动生成「标签 值(占比)」图例 |
 | `line` \| `arrow` \| `axis` | 直线 / 箭头 / 坐标轴 | 终点 `x2`（默认 `x+w`）、`y2`（默认 `y`）；`arrow`/`axis` 自带箭头，`line` 写 `"arrow": true` 也能带；`"dash": true` 虚线 |
 | `polyline` \| `curve` \| `polygon` | 折线 / 曲线 / 多边形 | `points` 点数组（**≥2 点**，不足则跳过该盒 + warning）；`polygon` 或 `"closed": true` 闭合；闭合后可 `fill` 填充 |
 | `ellipse` \| `circle` | 椭圆 / 圆 | 给 `r` → 以 `(x,y)` 为**圆心**画半径 r 的圆；不给 `r` → 用 `x/y/w/h` 当外接框。可 `fill` |
@@ -195,6 +197,7 @@ polaris.slides.json  →  polaris-forge spec-pptx  →  演示.pptx
 - **每盒必给 `x/y/w/h`**（`line` 可用 `x2/y2` 定终点，`circle`/`point` 可用 `r` 定半径）。
 - 颜色可写 `#RRGGBB`/`#RGB` 或色板词：`ink muted accent card line bg bg2 white black`。
 - 一页可放多张 `image`，各自带 `image` 路径，按出现顺序嵌图。缺盒/坏图/未知 type 只降级该盒 + warning，不毁整页。
+- **通用修饰字段（任意盒子可加）**：`rot` 旋转角度 0–359（仅 `text/rect/card/scrim/image/table` 这类块盒；线/多边形不接受）；`opacity` 整盒不透明度 0–100（图片盒不支持）。
 
 **⚠️ `freeform` 的 `text` 不走自适应字号。** 固定版式的字号由引擎按内容量自动算（放不下会自己缩），但 freeform 的 `size` **你给多少就是多少**（只 clamp 到 4–400）。字多框小 → 直接溢出，引擎不救你。写完自己按 1280×720 心算一遍：一个汉字宽 ≈ `size × 1.33` px，一行放得下 `w ÷ (size × 1.33)` 个字。
 
@@ -217,6 +220,33 @@ polaris.slides.json  →  polaris-forge spec-pptx  →  演示.pptx
 - 引擎生成的是**真 OOXML `<p:timing>`**，写法与 PowerPoint 自身一致 —— 放映时真能一步步点出来，导出后在 PowerPoint 里也还是真动画，不是假的。
 - **这是课件的杀手锏**：数学/物理的图「一笔笔加」（先坐标轴 → 再曲线 → 再标注）、解题步骤逐步揭示、先问后答（问题 `click:0`，答案 `click:1`）。**讲授节奏能被控制**，学生不会一上来就看到答案。
 - **只有 `freeform` 支持**；固定版式没有这个字段，写了也不读。
+
+##### freeform 专属：`anim` 富元素动画（`click` 的进阶版）
+
+任意盒子可加 `anim` 对象，效果比 `click` 的淡入丰富得多（同一盒子两者都写时 `anim` 优先）：
+
+```json
+{"type": "text", "x": 100, "y": 100, "w": 600, "h": 80, "text": "飞入的标题", "size": 32,
+ "anim": {"effect": "fly-in", "dir": "up", "dur": 600}}
+```
+
+- `effect`（必填）：进入 `appear`出现/`fade`淡化/`fly-in`飞入/`float-in`浮入/`wipe`擦除/`zoom`缩放；强调 `pulse`脉冲/`grow`放大/`transparency`透明；退出 `fade-out`淡出/`fly-out`飞出/`zoom-out`缩小消失/`disappear`消失。
+- `trigger`：`click`（默认，单击触发、自成一步）/ `with`（与上一效果同时）/ `after`（上一效果结束后自动播）。
+- `dur` 毫秒（默认 500）、`delay` 毫秒（默认 0）、`dir` 方向 `up/down/left/right`（`fly-in`/`fly-out`/`wipe` 用）。
+- 导出后是**真 `<p:timing>` 动画**，PowerPoint 放映原生生效（动画窗格里部分显示为「自定义」，不影响播放）。
+
+##### 页级字段：`transition` 页面切换动画
+
+**任意版式的页**（不限 freeform）可加 `transition` —— 翻到这一页时的切换效果：
+
+```json
+{"layout": "title", "title": "封面", "transition": {"type": "push", "dir": "up", "speed": "fast"}}
+```
+
+- `type`：`fade`淡入 / `fade-black`全黑淡入 / `push`推入 / `cover`覆盖 / `uncover`揭开 / `zoom`缩放。
+- `dir`：`up/down/left/right`（push/cover/uncover 用，语义 = 新页运动方向，`up` = 从底部推入）。
+- `speed`：`fast`/`med`(默认)/`slow`。
+- 导出写真 `<p:transition>`，PowerPoint 放映原生生效。封面/章节页给一个 `fade` 或 `push` 能明显提质感；**别每页换花样**，全篇统一或只在章节页变化。
 
 **别滥用 freeform**：能用固定版式就用固定版式（它们已调好间距字号，且自适应）。`freeform` 是「就差这一页排不出来」时才动的手术刀 —— 但**画图（坐标轴/受力分析/几何图形/流程连线）和需要逐步动画的页，它是唯一的路**，该用就用。用了就自己负责别让元素重叠出界。
 

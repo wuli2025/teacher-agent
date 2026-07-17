@@ -17,7 +17,10 @@ pub(crate) const DECK_ID: &str = "polaris-deck-studio";
 //     point/dot 四类此前完全没写，模型不知道能画坐标轴/受力图/几何图）；补 `click`
 //     单击逐步动画（引擎 build_timing() 早就出真 <p:timing>，此前零文档）；标注
 //     freeform 的 text 不走 autofit。**引擎能力早就有，只是模型读不到 → 白白用不上。**
-pub(crate) const DECK_VERSION: &str = "5";
+// v6: freeform 新增 table(真 a:tbl 表格)/chart(形状化图表) 两类盒子;通用修饰字段
+//     rot/opacity + text 盒 font:"serif";富元素动画 anim{effect,trigger,dur,delay,dir}
+//     (13 种效果,真 p:timing);页级 transition{type,dir,speed} 切换动画(真 p:transition)。
+pub(crate) const DECK_VERSION: &str = "6";
 pub(crate) const DECK_SKILL_MD: &str =
     include_str!("../../../../src/templates/skills/polaris-deck-studio/SKILL.md");
 pub(crate) const DECK_THEMES_CSS: &str =

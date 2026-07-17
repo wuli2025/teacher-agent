@@ -183,6 +183,8 @@ struct Para<'a> {
     align: &'a str, // l|ctr|r
     bullet: Option<u8>,
     space_after_pt: i64, // 段后距 pt(0=不写)
+    /// 衬线字体(freeform 文本盒 font:"serif")。只做 衬线/黑体 二选,不开放全字体族。
+    serif: bool,
 }
 
 impl<'a> Para<'a> {
@@ -196,6 +198,7 @@ impl<'a> Para<'a> {
             align: "l",
             bullet: None,
             space_after_pt: 0,
+            serif: false,
         }
     }
 }
@@ -227,10 +230,15 @@ fn para_xml(p: &Para<'_>, pal: &Palette) -> String {
         None => ppr.push_str("<a:buNone/>"),
     }
     ppr.push_str("</a:pPr>");
+    let (latin, ea) = if p.serif {
+        ("Georgia", "SimSun")
+    } else {
+        ("Calibri", "Microsoft YaHei")
+    };
     format!(
         "<a:p>{ppr}<a:r><a:rPr lang=\"zh-CN\" sz=\"{}\" b=\"{}\" i=\"{}\">\
 <a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>\
-<a:latin typeface=\"Calibri\"/><a:ea typeface=\"Microsoft YaHei\"/></a:rPr>\
+<a:latin typeface=\"{latin}\"/><a:ea typeface=\"{ea}\"/></a:rPr>\
 <a:t>{}</a:t></a:r></a:p>",
         p.size_pt * 100,
         if p.bold { 1 } else { 0 },
@@ -295,6 +303,345 @@ fn circle_num(id: u32, x: i64, y: i64, d: i64, label: &str, pal: &Palette) -> St
 <p:txBody><a:bodyPr anchor=\"ctr\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\"/>{}</p:txBody></p:sp>",
         x * PX, y * PX, d * PX, d * PX, pal.accent, para_xml(&p, pal)
     )
+}
+
+/// 真表格(p:graphicFrame + a:tbl):PowerPoint 里可继续编辑的原生表格。
+/// 配色取当前色板:表头 accent 底 + bg1 字,正文 card 底 + ink 字,网格线 card_line ——
+/// 与 deck 卡片同语言,换肤后重转自动跟走。
+fn table_xml(
+    id: u32,
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+    rows: &[Vec<String>],
+    ncols: usize,
+    header: bool,
+    size_pt: i64,
+    widths: Option<&[i64]>,
+    pal: &Palette,
+) -> String {
+    let nrows = rows.len().max(1) as i64;
+    // 列宽:给了 widths 按比例分,否则均分;像素级误差归尾列,总宽必须严格等于 w。
+    let col_w: Vec<i64> = match widths {
+        Some(ws) if ws.len() == ncols && ws.iter().all(|v| *v > 0) => {
+            let sum: i64 = ws.iter().sum();
+            let mut acc = 0i64;
+            ws.iter()
+                .enumerate()
+                .map(|(i, v)| {
+                    if i == ncols - 1 {
+                        w - acc
+                    } else {
+                        let cw = w * v / sum;
+                        acc += cw;
+                        cw
+                    }
+                })
+                .collect()
+        }
+        _ => {
+            let base = w / ncols as i64;
+            (0..ncols)
+                .map(|i| if i == ncols - 1 { w - base * (ncols as i64 - 1) } else { base })
+                .collect()
+        }
+    };
+    let row_h = (h / nrows).max(24);
+    let grid: String = col_w
+        .iter()
+        .map(|cw| format!("<a:gridCol w=\"{}\"/>", cw * PX))
+        .collect();
+    let mut trs = String::new();
+    for (r, row) in rows.iter().enumerate() {
+        let is_head = header && r == 0;
+        let mut tcs = String::new();
+        for c in 0..ncols {
+            let text = row.get(c).map(|s| s.as_str()).unwrap_or("");
+            let p = Para {
+                align: if is_head { "ctr" } else { "l" },
+                bold: is_head,
+                ..Para::plain(text, if is_head { size_pt + 1 } else { size_pt }, if is_head { pal.bg1 } else { pal.ink })
+            };
+            let fill = if is_head { pal.accent } else { pal.card };
+            let ln = |side: &str| {
+                format!(
+                    "<a:ln{side} w=\"12700\"><a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill></a:ln{side}>",
+                    pal.card_line
+                )
+            };
+            tcs.push_str(&format!(
+                "<a:tc><a:txBody><a:bodyPr/><a:lstStyle/>{}</a:txBody>\
+<a:tcPr marL=\"72000\" marR=\"72000\" marT=\"36000\" marB=\"36000\" anchor=\"ctr\">\
+{}{}{}{}<a:solidFill><a:srgbClr val=\"{fill}\"/></a:solidFill></a:tcPr></a:tc>",
+                para_xml(&p, pal),
+                ln("L"),
+                ln("R"),
+                ln("T"),
+                ln("B"),
+            ));
+        }
+        trs.push_str(&format!("<a:tr h=\"{}\">{tcs}</a:tr>", row_h * PX));
+    }
+    format!(
+        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"{id}\" name=\"table{id}\"/>\
+<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>\
+<p:xfrm><a:off x=\"{}\" y=\"{}\"/><a:ext cx=\"{}\" cy=\"{}\"/></p:xfrm>\
+<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/table\">\
+<a:tbl><a:tblPr firstRow=\"{}\" bandRow=\"0\"/><a:tblGrid>{grid}</a:tblGrid>{trs}</a:tbl>\
+</a:graphicData></a:graphic></p:graphicFrame>",
+        x * PX,
+        y * PX,
+        w * PX,
+        h * PX,
+        if header { 1 } else { 0 },
+    )
+}
+
+// ─────────────────────── 形状化图表 ───────────────────────
+// v1 约定:图表导出为**原生形状组**(矩形柱/折线/预置 pie/blockArc 扇形 + 文本标签),
+// PowerPoint 里能选中/改色/挪动,但**不能改数据后自动重绘**(数据编辑在 Polaris 里做,
+// 改完实时重绘+重转)。真 c:chart 极深,列为后备里程碑,此处不做。
+// 几何常量与 TS 预览(slidesSpec.ts chartSvg)**逐数字对齐**,预览即导出。
+
+/// 系列配色:首系列跟主题强调色,其余用与各色板都合的固定组。
+fn chart_series_color(idx: usize, pal: &Palette) -> String {
+    const EXTRA: [&str; 5] = ["5B8DEF", "E0A458", "6CBF8F", "B37FD4", "D46A6A"];
+    if idx == 0 {
+        pal.accent.to_string()
+    } else {
+        EXTRA[(idx - 1) % EXTRA.len()].to_string()
+    }
+}
+
+/// 扇形(饼图切片):OOXML 预置 pie,角度 1/60000 度、自 3 点钟顺时针。
+fn pie_slice_xml(id: u32, x: i64, y: i64, d: i64, a1: i64, a2: i64, color: &str, pal: &Palette) -> String {
+    format!(
+        "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"slice{id}\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>\
+<p:spPr><a:xfrm><a:off x=\"{}\" y=\"{}\"/><a:ext cx=\"{}\" cy=\"{}\"/></a:xfrm>\
+<a:prstGeom prst=\"pie\"><a:avLst><a:gd name=\"adj1\" fmla=\"val {a1}\"/><a:gd name=\"adj2\" fmla=\"val {a2}\"/></a:avLst></a:prstGeom>\
+<a:solidFill><a:srgbClr val=\"{color}\"/></a:solidFill>\
+<a:ln w=\"19050\"><a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill></a:ln></p:spPr>\
+<p:txBody><a:bodyPr/><a:p/></p:txBody></p:sp>",
+        x * PX, y * PX, d * PX, d * PX, pal.bg1
+    )
+}
+
+/// 环形图切片:预置 blockArc(adj3=内孔比例)。
+fn donut_slice_xml(id: u32, x: i64, y: i64, d: i64, a1: i64, a2: i64, color: &str, pal: &Palette) -> String {
+    format!(
+        "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"ring{id}\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>\
+<p:spPr><a:xfrm><a:off x=\"{}\" y=\"{}\"/><a:ext cx=\"{}\" cy=\"{}\"/></a:xfrm>\
+<a:prstGeom prst=\"blockArc\"><a:avLst><a:gd name=\"adj1\" fmla=\"val {a1}\"/><a:gd name=\"adj2\" fmla=\"val {a2}\"/><a:gd name=\"adj3\" fmla=\"val 19000\"/></a:avLst></a:prstGeom>\
+<a:solidFill><a:srgbClr val=\"{color}\"/></a:solidFill>\
+<a:ln w=\"19050\"><a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill></a:ln></p:spPr>\
+<p:txBody><a:bodyPr/><a:p/></p:txBody></p:sp>",
+        x * PX, y * PX, d * PX, d * PX, pal.bg1
+    )
+}
+
+/// 数值显示:整数不带小数点,小数最多留 1 位。
+fn fmt_val(v: f64) -> String {
+    if (v - v.round()).abs() < 1e-9 {
+        format!("{}", v.round() as i64)
+    } else {
+        format!("{v:.1}")
+    }
+}
+
+/// chart 盒 → 形状组 XML。返回 (xml, 用掉的 id 数);数据非法时返回 None(调用方告警)。
+#[allow(clippy::too_many_arguments)]
+fn chart_shapes(
+    mut id: u32,
+    kind: &str,
+    b: &Value,
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+    pal: &Palette,
+) -> Option<(String, u32)> {
+    let labels: Vec<String> = b
+        .get("labels")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().map(|s| s.as_str().unwrap_or("").to_string()).collect())
+        .unwrap_or_default();
+    // series:number[][](多系列)或 number[](单系列)
+    let series: Vec<Vec<f64>> = match b.get("series") {
+        Some(Value::Array(a)) if a.iter().all(|v| v.is_number()) => {
+            vec![a.iter().map(|v| v.as_f64().unwrap_or(0.0).max(0.0)).collect()]
+        }
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|row| row.as_array())
+            .map(|row| row.iter().map(|v| v.as_f64().unwrap_or(0.0).max(0.0)).collect())
+            .collect(),
+        _ => Vec::new(),
+    };
+    if labels.is_empty() || series.is_empty() || series.iter().all(|s| s.is_empty()) {
+        return None;
+    }
+    let names: Vec<String> = b
+        .get("names")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().map(|s| s.as_str().unwrap_or("").to_string()).collect())
+        .unwrap_or_default();
+    let title = s_str(b, "title");
+    let ns = series.len();
+    let nl = labels.len();
+    // 几何切分(与 TS 预览逐数字对齐):标题 26 / 底部类目标签 18 / 图例 20 / 内边距 6
+    let title_h = if title.is_empty() { 0 } else { 26 };
+    let is_pie = kind == "pie" || kind == "donut";
+    let xlab_h = if is_pie { 0 } else { 18 };
+    let legend_h = if is_pie || (ns > 1 && !names.is_empty()) { 20 } else { 0 };
+    let pad = 6i64;
+    let px0 = x + pad;
+    let py0 = y + title_h + pad;
+    let pw = (w - 2 * pad).max(40);
+    let ph = (h - title_h - xlab_h - legend_h - 2 * pad).max(40);
+    let baseline = py0 + ph;
+    let maxv = series
+        .iter()
+        .flat_map(|s| s.iter())
+        .fold(0.0f64, |m, v| m.max(*v))
+        .max(1e-9);
+    let mut s = String::new();
+    if !title.is_empty() {
+        let p = Para { align: "ctr", bold: true, ..Para::plain(title, 14, pal.ink) };
+        s.push_str(&text_box(id, x, y, w, 26, "t", &para_xml(&p, pal)));
+        id += 1;
+    }
+    match kind {
+        "bar" => {
+            // 底线 + 分组柱 + 柱顶数值 + 类目标签
+            s.push_str(&solid_rect(id, px0, baseline, pw, 2, pal.card_line));
+            id += 1;
+            let group_w = pw / nl as i64;
+            let inner = group_w * 72 / 100;
+            let bar_w = (inner / ns as i64).max(4);
+            for (si, sv) in series.iter().enumerate() {
+                let color = chart_series_color(si, pal);
+                for (li, v) in sv.iter().take(nl).enumerate() {
+                    let bh = ((v / maxv) * (ph - 14) as f64).round() as i64;
+                    let bx = px0 + li as i64 * group_w + (group_w - inner) / 2 + si as i64 * bar_w;
+                    if bh > 0 {
+                        s.push_str(&solid_rect(id, bx, baseline - bh, bar_w - 2, bh, &color));
+                        id += 1;
+                    }
+                    if ns == 1 {
+                        let vs = fmt_val(*v); // 先落地:Para 借用 &str,临时 String 活不过这一句
+                        let p = Para { align: "ctr", ..Para::plain(&vs, 10, pal.muted) };
+                        s.push_str(&text_box(id, bx - 20, baseline - bh - 16, bar_w + 40, 14, "t", &para_xml(&p, pal)));
+                        id += 1;
+                    }
+                }
+            }
+            for (li, lab) in labels.iter().enumerate() {
+                let p = Para { align: "ctr", ..Para::plain(lab, 10, pal.muted) };
+                s.push_str(&text_box(id, px0 + li as i64 * group_w, baseline + 4, group_w, 16, "t", &para_xml(&p, pal)));
+                id += 1;
+            }
+        }
+        "line" => {
+            s.push_str(&solid_rect(id, px0, baseline, pw, 2, pal.card_line));
+            id += 1;
+            let group_w = pw / nl as i64;
+            for (si, sv) in series.iter().enumerate() {
+                let color = chart_series_color(si, pal);
+                let pts: Vec<(i64, i64)> = sv
+                    .iter()
+                    .take(nl)
+                    .enumerate()
+                    .map(|(li, v)| {
+                        (
+                            px0 + li as i64 * group_w + group_w / 2,
+                            baseline - ((v / maxv) * (ph - 14) as f64).round() as i64,
+                        )
+                    })
+                    .collect();
+                if pts.len() >= 2 {
+                    s.push_str(&polyline_xml(id, &pts, &color, 3, false, None));
+                    id += 1;
+                }
+                for (cx, cy) in &pts {
+                    s.push_str(&ellipse_xml(id, cx - 4, cy - 4, 8, 8, &color, 1, Some(&color)));
+                    id += 1;
+                }
+            }
+            for (li, lab) in labels.iter().enumerate() {
+                let p = Para { align: "ctr", ..Para::plain(lab, 10, pal.muted) };
+                s.push_str(&text_box(id, px0 + li as i64 * group_w, baseline + 4, group_w, 16, "t", &para_xml(&p, pal)));
+                id += 1;
+            }
+        }
+        "pie" | "donut" => {
+            // 只用首系列;自 12 点钟(270°)顺时针。OOXML 角度 = 1/60000 度、自 3 点钟起。
+            let sv = &series[0];
+            let total: f64 = sv.iter().take(nl).sum();
+            if total <= 0.0 {
+                return None;
+            }
+            let d = pw.min(ph);
+            let cx = x + w / 2 - d / 2;
+            let cy = py0 + (ph - d) / 2;
+            let mut ang = 270.0f64;
+            for (li, v) in sv.iter().take(nl).enumerate() {
+                let sweep = v / total * 360.0;
+                if sweep <= 0.0 {
+                    continue;
+                }
+                let a1 = ((ang % 360.0) * 60000.0).round() as i64;
+                let a2 = (((ang + sweep) % 360.0) * 60000.0).round() as i64;
+                let color = chart_series_color(li, pal);
+                if kind == "pie" {
+                    s.push_str(&pie_slice_xml(id, cx, cy, d, a1, a2, &color, pal));
+                } else {
+                    s.push_str(&donut_slice_xml(id, cx, cy, d, a1, a2, &color, pal));
+                }
+                id += 1;
+                ang += sweep;
+            }
+        }
+        _ => return None,
+    }
+    // 图例:饼/环 = 「标签 值(占比)」,多系列柱/折线 = 系列名;均分一行铺在底部。
+    if legend_h > 0 {
+        let ly = y + h - legend_h + 2;
+        let entries: Vec<(String, String)> = if is_pie {
+            let sv = &series[0];
+            let total: f64 = sv.iter().take(nl).sum::<f64>().max(1e-9);
+            labels
+                .iter()
+                .take(nl)
+                .enumerate()
+                .map(|(li, lab)| {
+                    let v = sv.get(li).copied().unwrap_or(0.0);
+                    (
+                        chart_series_color(li, pal),
+                        format!("{lab} {}({:.0}%)", fmt_val(v), v / total * 100.0),
+                    )
+                })
+                .collect()
+        } else {
+            names
+                .iter()
+                .take(ns)
+                .enumerate()
+                .map(|(si, n)| (chart_series_color(si, pal), n.clone()))
+                .collect()
+        };
+        let n = entries.len().max(1) as i64;
+        let cell = pw / n;
+        for (ei, (color, text)) in entries.iter().enumerate() {
+            let ex = px0 + ei as i64 * cell;
+            s.push_str(&solid_rect(id, ex + cell / 2 - 46, ly + 4, 10, 10, color));
+            id += 1;
+            let p = Para { ..Para::plain(text, 10, pal.muted) };
+            s.push_str(&text_box(id, ex + cell / 2 - 32, ly, cell / 2 + 46, 16, "t", &para_xml(&p, pal)));
+            id += 1;
+        }
+    }
+    Some((s, id))
 }
 
 // ─────────────────────── 配图原语 ───────────────────────
@@ -796,6 +1143,7 @@ fn slide_content(
     img: Option<(u32, u32)>,
     free: &[Option<SlideImage>],
     anims: &mut Vec<(u32, u32)>,
+    rich: &mut Vec<RichAnim>,
 ) -> String {
     let layout = s_str(sl, "layout");
     let mut id = 10u32;
@@ -1379,6 +1727,7 @@ fn slide_content(
                     .map(|s| norm_color(s, pal, pal.accent));
                 let sid = id; // 本盒将占用的形状 id(供动画定位);仅在真产出形状时记账。
                 let mut emitted = false;
+                let pre_len = s.len(); // rot/opacity 对刚产出的这段 XML 做后处理,记住起点
                 match s_str(b, "type") {
                     "line" | "arrow" | "axis" => {
                         let x2 = s_i64(b, "x2", x + w);
@@ -1454,6 +1803,7 @@ fn slide_content(
                         let color = norm_color(s_str(b, "color"), pal, pal.ink);
                         let bold = s_bool(b, "bold", false);
                         let italic = s_bool(b, "italic", false);
+                        let serif = s_str(b, "font").eq_ignore_ascii_case("serif");
                         let mut paras = String::new();
                         if let Some(lines) = b.get("lines").and_then(|x| x.as_array()) {
                             for ln in lines {
@@ -1462,6 +1812,7 @@ fn slide_content(
                                         align,
                                         bold,
                                         italic,
+                                        serif,
                                         ..Para::plain(t, size, &color)
                                     };
                                     paras.push_str(&para_xml(&p, pal));
@@ -1472,6 +1823,7 @@ fn slide_content(
                                 align,
                                 bold,
                                 italic,
+                                serif,
                                 ..Para::plain(s_str(b, "text"), size, &color)
                             };
                             paras.push_str(&para_xml(&p, pal));
@@ -1500,6 +1852,66 @@ fn slide_content(
                         id += 1;
                         emitted = true;
                     }
+                    "chart" => {
+                        let kind = s_str(b, "chartType");
+                        match chart_shapes(id, kind, b, x, y, w, h, pal) {
+                            Some((xml, next_id)) => {
+                                s.push_str(&xml);
+                                id = next_id;
+                                emitted = true;
+                            }
+                            None => warnings.push(format!(
+                                "第 {page} 页 freeform 图表数据不全(需 chartType/labels/series),已跳过"
+                            )),
+                        }
+                    }
+                    "table" => {
+                        // rows: [["表头1","表头2"],["a","b"],…];header 缺省 true(首行做表头)。
+                        let rows: Vec<Vec<String>> = b
+                            .get("rows")
+                            .and_then(|x| x.as_array())
+                            .map(|rs| {
+                                rs.iter()
+                                    .map(|r| {
+                                        r.as_array()
+                                            .map(|cells| {
+                                                cells
+                                                    .iter()
+                                                    .map(|c| c.as_str().unwrap_or("").to_string())
+                                                    .collect()
+                                            })
+                                            .unwrap_or_default()
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let ncols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+                        if rows.is_empty() || ncols == 0 {
+                            warnings.push(format!("第 {page} 页 freeform 表格缺 rows,已跳过"));
+                        } else {
+                            let header = s_bool(b, "header", true);
+                            let size = s_i64(b, "size", 14).clamp(6, 40);
+                            let widths: Option<Vec<i64>> = b
+                                .get("widths")
+                                .and_then(|x| x.as_array())
+                                .map(|a| a.iter().map(|v| v.as_i64().unwrap_or(0)).collect());
+                            s.push_str(&table_xml(
+                                id,
+                                x,
+                                y,
+                                w,
+                                h,
+                                &rows,
+                                ncols,
+                                header,
+                                size,
+                                widths.as_deref(),
+                                pal,
+                            ));
+                            id += 1;
+                            emitted = true;
+                        }
+                    }
                     "image" | "pic" => {
                         let rid = format!("rId{}", FREE_IMG_RID_BASE + fi as u32);
                         match free.get(fi).and_then(|o| o.as_ref()) {
@@ -1527,9 +1939,53 @@ fn slide_content(
                         "第 {page} 页 freeform 未知盒子类型 \"{other}\",已跳过"
                     )),
                 }
-                // 记账:这个盒子确实产出了形状且要求单击显现 → 进动画序列。
-                if emitted && click > 0 {
-                    anims.push((sid, click));
+                // rot/opacity:对本盒刚产出的 XML 做定点后处理(不改各原语签名)。
+                // rot 只给 div 类盒子 —— SVG 线/多边形的 xfrm 是画布级包围盒,转它会绕错轴心;
+                // opacity 走 <a:alpha> 注入 solidFill(填充/描边/文字色一起淡,语义同 CSS opacity),
+                // 图片无 solidFill 不支持(预览端同样跳过,两端一致)。
+                let rot = s_i64(b, "rot", 0).rem_euclid(360);
+                let opacity = s_i64(b, "opacity", 100).clamp(0, 100);
+                let rotatable = matches!(
+                    s_str(b, "type"),
+                    "text" | "rect" | "bar" | "card" | "scrim" | "image" | "pic"
+                );
+                if emitted && ((rot != 0 && rotatable) || opacity < 100) {
+                    let mut tail = s.split_off(pre_len);
+                    if rot != 0 && rotatable {
+                        tail = tail.replacen(
+                            "<a:xfrm>",
+                            &format!("<a:xfrm rot=\"{}\">", rot * 60000),
+                            1,
+                        );
+                    }
+                    if opacity < 100 {
+                        tail = tail.replace(
+                            "\"/></a:solidFill>",
+                            &format!(
+                                "\"><a:alpha val=\"{}\"/></a:srgbClr></a:solidFill>",
+                                opacity * 1000
+                            ),
+                        );
+                    }
+                    s.push_str(&tail);
+                }
+                // 记账:进动画序列。anim 字段(富效果)优先;否则退回 click 淡入。
+                if emitted {
+                    let an = b.get("anim");
+                    let effect = an.map(|a| s_str(a, "effect")).unwrap_or("");
+                    if !effect.is_empty() {
+                        let an = an.unwrap();
+                        rich.push(RichAnim {
+                            spid: sid,
+                            effect: effect.to_string(),
+                            trigger: s_str(an, "trigger").to_string(),
+                            dur: s_i64(an, "dur", 500).clamp(50, 10_000) as u32,
+                            delay: s_i64(an, "delay", 0).clamp(0, 10_000) as u32,
+                            dir: s_str(an, "dir").to_string(),
+                        });
+                    } else if click > 0 {
+                        anims.push((sid, click));
+                    }
                 }
             }
         }
@@ -1635,12 +2091,243 @@ fn build_timing(anims: &[(u32, u32)]) -> String {
     )
 }
 
-fn native_slide_xml(content: &str, pal: &Palette, timing: &str) -> String {
+// ─────────────────────── 元素动画(富效果) ───────────────────────
+// 盒子字段 `anim: { effect, trigger?, dur?, delay?, dir? }`:
+//   进入: appear|fade|fly-in|float-in|wipe|zoom   强调: pulse|grow|transparency
+//   退出: fade-out|fly-out|zoom-out|disappear
+//   trigger: click(默认)|with|after   dur: 毫秒(默认 500)   dir: up|down|left|right(fly 用)
+// 全部由 set/animEffect/anim(ppt_x/y)/animScale 四种 OOXML 行为原语组合而成 ——
+// PowerPoint 放映原生生效;动画窗格里部分显示为「自定义」,不影响播放与再编辑。
+
+struct RichAnim {
+    spid: u32,
+    effect: String,
+    trigger: String, // click|with|after
+    dur: u32,
+    delay: u32,
+    dir: String,
+}
+
+/// 单个效果的 <p:par> 时间线节点。next 为节点 id 发号器。
+fn effect_par(next: &mut dyn FnMut() -> u32, a: &RichAnim, node: &str) -> String {
+    let sp = a.spid;
+    let dur = a.dur.max(1);
+    let tgt = format!("<p:tgtEl><p:spTgt spid=\"{sp}\"/></p:tgtEl>");
+    let set_vis = |next: &mut dyn FnMut() -> u32, val: &str, delay: u32| {
+        format!(
+            "<p:set><p:cBhvr><p:cTn id=\"{}\" dur=\"1\" fill=\"hold\"><p:stCondLst><p:cond delay=\"{delay}\"/></p:stCondLst></p:cTn>\
+{tgt}<p:attrNameLst><p:attrName>style.visibility</p:attrName></p:attrNameLst></p:cBhvr>\
+<p:to><p:strVal val=\"{val}\"/></p:to></p:set>",
+            next()
+        )
+    };
+    let fade = |next: &mut dyn FnMut() -> u32, way: &str| {
+        format!(
+            "<p:animEffect transition=\"{way}\" filter=\"fade\"><p:cBhvr><p:cTn id=\"{}\" dur=\"{dur}\"/>{tgt}</p:cBhvr></p:animEffect>",
+            next()
+        )
+    };
+    let wipe = |next: &mut dyn FnMut() -> u32| {
+        let d = match a.dir.as_str() { "down" => "down", "left" => "left", "right" => "right", _ => "up" };
+        format!(
+            "<p:animEffect transition=\"in\" filter=\"wipe({d})\"><p:cBhvr><p:cTn id=\"{}\" dur=\"{dur}\"/>{tgt}</p:cBhvr></p:animEffect>",
+            next()
+        )
+    };
+    // 位移(飞入/飞出):ppt_x/ppt_y 公式驱动,offx/offy 是屏幕外起点/终点
+    let fly = |next: &mut dyn FnMut() -> u32, inward: bool| {
+        let (ox, oy) = match a.dir.as_str() {
+            "down" => ("#ppt_x", "0-#ppt_h/2"),
+            "left" => ("1+#ppt_w/2", "#ppt_y"),
+            "right" => ("0-#ppt_w/2", "#ppt_y"),
+            _ => ("#ppt_x", "1+#ppt_h/2"), // up = 从底部来/往底部去
+        };
+        let one = |next: &mut dyn FnMut() -> u32, attr: &str, from: &str, to: &str| {
+            format!(
+                "<p:anim calcmode=\"lin\" valueType=\"num\"><p:cBhvr additive=\"base\"><p:cTn id=\"{}\" dur=\"{dur}\" fill=\"hold\"/>{tgt}\
+<p:attrNameLst><p:attrName>{attr}</p:attrName></p:attrNameLst></p:cBhvr>\
+<p:tavLst><p:tav tm=\"0\"><p:val><p:strVal val=\"{from}\"/></p:val></p:tav>\
+<p:tav tm=\"100000\"><p:val><p:strVal val=\"{to}\"/></p:val></p:tav></p:tavLst></p:anim>",
+                next()
+            )
+        };
+        if inward {
+            format!("{}{}", one(next, "ppt_x", ox, "#ppt_x"), one(next, "ppt_y", oy, "#ppt_y"))
+        } else {
+            format!("{}{}", one(next, "ppt_x", "#ppt_x", ox), one(next, "ppt_y", "#ppt_y", oy))
+        }
+    };
+    // from/to 是 CT_TLPoint:x/y 直接做属性,**不能**再包 <p:pt> 子元素
+    // (包了 PowerPoint 拒开整个文件 —— COM 终验抓到的坑)。
+    let scale = |next: &mut dyn FnMut() -> u32, from: u32, to: u32, auto_rev: bool| {
+        format!(
+            "<p:animScale><p:cBhvr><p:cTn id=\"{}\" dur=\"{dur}\" fill=\"hold\"{}/>{tgt}</p:cBhvr>\
+<p:from x=\"{from}\" y=\"{from}\"/><p:to x=\"{to}\" y=\"{to}\"/></p:animScale>",
+            next(),
+            if auto_rev { " autoRev=\"1\"" } else { "" }
+        )
+    };
+    let opacity = |next: &mut dyn FnMut() -> u32, to: &str| {
+        format!(
+            "<p:anim calcmode=\"lin\" valueType=\"num\"><p:cBhvr><p:cTn id=\"{}\" dur=\"{dur}\" fill=\"hold\"/>{tgt}\
+<p:attrNameLst><p:attrName>style.opacity</p:attrName></p:attrNameLst></p:cBhvr>\
+<p:tavLst><p:tav tm=\"0\"><p:val><p:strVal val=\"1\"/></p:val></p:tav>\
+<p:tav tm=\"100000\"><p:val><p:strVal val=\"{to}\"/></p:val></p:tav></p:tavLst></p:anim>",
+            next()
+        )
+    };
+    // (presetClass, presetID, 行为串)。preset 编号对 PowerPoint 动画窗格的归类展示友好,播放不依赖它。
+    let (class, pid, behaviors) = match a.effect.as_str() {
+        "appear" => ("entr", 1, set_vis(next, "visible", 0)),
+        "fly-in" => ("entr", 2, format!("{}{}", set_vis(next, "visible", 0), fly(next, true))),
+        "float-in" => {
+            let drift = format!(
+                "<p:anim calcmode=\"lin\" valueType=\"num\"><p:cBhvr additive=\"base\"><p:cTn id=\"{}\" dur=\"{dur}\" fill=\"hold\"/>{tgt}\
+<p:attrNameLst><p:attrName>ppt_y</p:attrName></p:attrNameLst></p:cBhvr>\
+<p:tavLst><p:tav tm=\"0\"><p:val><p:strVal val=\"#ppt_y+0.08\"/></p:val></p:tav>\
+<p:tav tm=\"100000\"><p:val><p:strVal val=\"#ppt_y\"/></p:val></p:tav></p:tavLst></p:anim>",
+                next()
+            );
+            ("entr", 42, format!("{}{}{}", set_vis(next, "visible", 0), fade(next, "in"), drift))
+        }
+        "wipe" => ("entr", 22, format!("{}{}", set_vis(next, "visible", 0), wipe(next))),
+        "zoom" => ("entr", 23, format!("{}{}", set_vis(next, "visible", 0), scale(next, 0, 100_000, false))),
+        "pulse" => ("emph", 70, scale(next, 100_000, 108_000, true)),
+        "grow" => ("emph", 6, scale(next, 100_000, 125_000, false)),
+        "transparency" => ("emph", 9, opacity(next, "0.4")),
+        "fade-out" => ("exit", 10, format!("{}{}", fade(next, "out"), set_vis(next, "hidden", dur))),
+        "fly-out" => ("exit", 2, format!("{}{}", fly(next, false), set_vis(next, "hidden", dur))),
+        "zoom-out" => ("exit", 23, format!("{}{}", scale(next, 100_000, 0, false), set_vis(next, "hidden", dur))),
+        "disappear" => ("exit", 1, set_vis(next, "hidden", 0)),
+        // 缺省当 fade 进入
+        _ => ("entr", 10, format!("{}{}", set_vis(next, "visible", 0), fade(next, "in"))),
+    };
+    format!(
+        "<p:par><p:cTn id=\"{}\" presetID=\"{pid}\" presetClass=\"{class}\" presetSubtype=\"0\" fill=\"hold\" grpId=\"0\" nodeType=\"{node}\">\
+<p:stCondLst><p:cond delay=\"{}\"/></p:stCondLst><p:childTnLst>{behaviors}</p:childTnLst></p:cTn></p:par>",
+        next(),
+        a.delay
+    )
+}
+
+/// 富动画时间线:legacy click 组(升序)在前,anim 字段的盒子按 boxes 顺序在后。
+/// 每步 = 一次单击:首个 clickEffect,同步 withEffect,after 触发 afterEffect。
+fn build_timing_rich(legacy: &[(u32, u32)], rich: &[RichAnim]) -> String {
+    if legacy.is_empty() && rich.is_empty() {
+        return String::new();
+    }
+    // 步骤序列:Vec<(效果, 节点类型)> 的列表
+    let mut steps: Vec<Vec<(RichAnim, String)>> = Vec::new();
+    let mut clicks: Vec<u32> = legacy.iter().map(|a| a.1).collect();
+    clicks.sort_unstable();
+    clicks.dedup();
+    for c in &clicks {
+        let group: Vec<(RichAnim, String)> = legacy
+            .iter()
+            .filter(|a| a.1 == *c)
+            .enumerate()
+            .map(|(j, (sid, _))| {
+                (
+                    RichAnim { spid: *sid, effect: "fade".into(), trigger: String::new(), dur: 400, delay: 0, dir: String::new() },
+                    if j == 0 { "clickEffect".to_string() } else { "withEffect".to_string() },
+                )
+            })
+            .collect();
+        steps.push(group);
+    }
+    for a in rich {
+        let node = match a.trigger.as_str() {
+            "with" => "withEffect",
+            "after" => "afterEffect",
+            _ => "clickEffect",
+        };
+        let entry = (
+            RichAnim { spid: a.spid, effect: a.effect.clone(), trigger: a.trigger.clone(), dur: a.dur, delay: a.delay, dir: a.dir.clone() },
+            node.to_string(),
+        );
+        if node == "clickEffect" || steps.is_empty() {
+            steps.push(vec![(entry.0, "clickEffect".to_string())]);
+        } else {
+            steps.last_mut().unwrap().push(entry);
+        }
+    }
+    let mut nid = 10u32;
+    let mut next = || {
+        let v = nid;
+        nid += 1;
+        v
+    };
+    let mut steps_xml = String::new();
+    let mut spids: Vec<u32> = Vec::new();
+    for group in &steps {
+        let mut effects = String::new();
+        for (a, node) in group {
+            spids.push(a.spid);
+            effects.push_str(&effect_par(&mut next, a, node));
+        }
+        let (ida, idb) = (next(), next());
+        steps_xml.push_str(&format!(
+            "<p:par><p:cTn id=\"{ida}\" fill=\"hold\"><p:stCondLst><p:cond delay=\"indefinite\"/></p:stCondLst><p:childTnLst>\
+<p:par><p:cTn id=\"{idb}\" fill=\"hold\"><p:stCondLst><p:cond delay=\"0\"/></p:stCondLst><p:childTnLst>\
+{effects}</p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par>"
+        ));
+    }
+    spids.sort_unstable();
+    spids.dedup();
+    let bld: String = spids
+        .iter()
+        .map(|sid| format!("<p:bldP spid=\"{sid}\" grpId=\"0\"/>"))
+        .collect();
+    format!(
+        "<p:timing><p:tnLst><p:par><p:cTn id=\"1\" dur=\"indefinite\" restart=\"never\" nodeType=\"tmRoot\">\
+<p:childTnLst><p:seq concurrent=\"1\" nextAc=\"seek\"><p:cTn id=\"2\" dur=\"indefinite\" nodeType=\"mainSeq\">\
+<p:childTnLst>{steps_xml}</p:childTnLst></p:cTn>\
+<p:prevCondLst><p:cond evt=\"onPrev\" delay=\"0\"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:prevCondLst>\
+<p:nextCondLst><p:cond evt=\"onNext\" delay=\"0\"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:nextCondLst>\
+</p:seq></p:childTnLst></p:cTn></p:par></p:tnLst><p:bldLst>{bld}</p:bldLst></p:timing>"
+    )
+}
+
+/// 页级切换动画:spec 页的 `transition: { type, dir?, speed? }` → `<p:transition>`。
+/// type: fade(淡入) | fade-black(全黑淡入) | push(推入) | cover(覆盖) | uncover(揭开,OOXML=pull) | zoom(缩放)。
+/// dir: up|down|left|right(push/cover/uncover 用);speed: fast|med|slow(缺省 med)。
+/// 未知 type 返回空串(宁可没动画,不写坏 XML)。
+fn build_transition(sl: &Value) -> String {
+    let Some(tr) = sl.get("transition") else { return String::new() };
+    let ty = s_str(tr, "type");
+    if ty.is_empty() {
+        return String::new();
+    }
+    let spd = match s_str(tr, "speed") {
+        "fast" => "fast",
+        "slow" => "slow",
+        _ => "med",
+    };
+    // OOXML 的 dir 语义是「新页运动方向」:UI 说「从底部推入」= 内容向上运动 = dir="u"。
+    let dir = match s_str(tr, "dir") {
+        "down" => "d",
+        "left" => "l",
+        "right" => "r",
+        _ => "u",
+    };
+    let inner = match ty {
+        "fade" => "<p:fade/>".to_string(),
+        "fade-black" => "<p:fade thruBlk=\"1\"/>".to_string(),
+        "push" => format!("<p:push dir=\"{dir}\"/>"),
+        "cover" => format!("<p:cover dir=\"{dir}\"/>"),
+        "uncover" => format!("<p:pull dir=\"{dir}\"/>"),
+        "zoom" => "<p:zoom/>".to_string(),
+        _ => return String::new(),
+    };
+    format!("<p:transition spd=\"{spd}\">{inner}</p:transition>")
+}
+
+fn native_slide_xml(content: &str, pal: &Palette, transition: &str, timing: &str) -> String {
     format!(
         "{decl}<p:sld xmlns:a=\"{a}\" xmlns:r=\"{r}\" xmlns:p=\"{p}\"><p:cSld>{bg}<p:spTree>\
 <p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>\
 <p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>\
-{content}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>{timing}</p:sld>",
+{content}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>{transition}{timing}</p:sld>",
         decl = xml_decl(), a = NS_A, r = NS_R, p = NS_P, bg = slide_bg(pal)
     )
 }
@@ -1767,9 +2454,12 @@ pub fn build_pptx_from_spec(spec_json: &str, out_path: &str) -> Result<Value, St
     for (i, sl) in slides.iter().enumerate() {
         let dims = images[i].as_ref().map(|im| (im.w, im.h));
         let mut anims: Vec<(u32, u32)> = Vec::new();
-        let content = slide_content(sl, &pal, &mut warnings, i + 1, dims, &free_imgs[i], &mut anims);
-        let timing = build_timing(&anims);
-        slide_xmls.push(native_slide_xml(&content, &pal, &timing));
+        let mut rich: Vec<RichAnim> = Vec::new();
+        let content = slide_content(sl, &pal, &mut warnings, i + 1, dims, &free_imgs[i], &mut anims, &mut rich);
+        // 有富效果走富时间线(legacy click 组照样并入);纯 click 保持原路(既有测试语义不变)。
+        let timing = if rich.is_empty() { build_timing(&anims) } else { build_timing_rich(&anims, &rich) };
+        let transition = build_transition(sl);
+        slide_xmls.push(native_slide_xml(&content, &pal, &transition, &timing));
         let nt = s_str(sl, "notes").trim().to_string();
         notes.push(if nt.is_empty() { None } else { Some(nt) });
     }
@@ -2283,6 +2973,152 @@ mod tests {
         assert!(s1.contains("nodeType=\"withEffect\""), "同击多形状用 withEffect 并现");
         assert_eq!(s1.matches("<p:cond delay=\"indefinite\"/>").count(), 3, "三个单击步骤");
         assert!(s1.contains("filter=\"fade\"") && s1.contains("<p:bldLst>"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn freeform_rot_opacity_serif_land_in_ooxml() {
+        let dir = std::env::temp_dir().join("polaris_native_pptx_fx");
+        let _ = std::fs::create_dir_all(&dir);
+        let out = dir.join("fx.pptx");
+        let spec = r##"{"theme":"minimal-white","slides":[
+            {"layout":"freeform","boxes":[
+                {"type":"text","x":100,"y":100,"w":400,"h":80,"text":"衬线旋转字","size":24,"font":"serif","rot":45},
+                {"type":"rect","x":600,"y":100,"w":200,"h":100,"color":"accent","opacity":40},
+                {"type":"line","x":100,"y":300,"x2":500,"y2":300,"color":"ink","width":3,"rot":90},
+                {"type":"card","x":600,"y":300,"w":300,"h":150}
+            ]}
+        ]}"##;
+        let r = build_pptx_from_spec(spec, &out.to_string_lossy()).expect("应成功");
+        assert_eq!(r["warnings"].as_array().unwrap().len(), 0, "不应有告警");
+        let v = crate::forge::pptx::validate_pptx(&out.to_string_lossy()).unwrap();
+        assert!(v.ok, "校验失败: {:?}", v.errors);
+        let s1 = read_part(&out, "ppt/slides/slide1.xml");
+        // rot:45° = 45*60000 EMU 角;只允许出现在 text 盒(line 的 rot 必须被忽略)
+        assert!(s1.contains("rot=\"2700000\""), "text 盒应带 rot");
+        assert!(!s1.contains("rot=\"5400000\""), "line 类盒子不接受 rot(绕错轴心)");
+        // opacity:40% → alpha 40000,注入 rect 的 solidFill
+        assert!(s1.contains("<a:alpha val=\"40000\"/>"), "rect 应带 alpha");
+        // serif:Georgia/宋体;未指定的仍是 Calibri/雅黑
+        assert!(s1.contains("typeface=\"Georgia\"") && s1.contains("typeface=\"SimSun\""));
+        // card 未受 fx 后处理污染(仍有完整卡片描边)
+        assert!(s1.contains("prst=\"roundRect\""));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn freeform_table_is_native_a_tbl() {
+        let dir = std::env::temp_dir().join("polaris_native_pptx_tbl");
+        let _ = std::fs::create_dir_all(&dir);
+        let out = dir.join("tbl.pptx");
+        let spec = r##"{"theme":"tech-blue","slides":[
+            {"layout":"freeform","boxes":[
+                {"type":"table","x":240,"y":190,"w":800,"h":192,
+                 "rows":[["科目","课时","占比"],["数学","6","30%"],["语文","5","25%"],["英语","4","20%"]],
+                 "header":true,"size":14,"widths":[2,1,1]}
+            ]}
+        ]}"##;
+        let r = build_pptx_from_spec(spec, &out.to_string_lossy()).expect("应成功");
+        assert_eq!(r["warnings"].as_array().unwrap().len(), 0, "不应有告警");
+        let v = crate::forge::pptx::validate_pptx(&out.to_string_lossy()).unwrap();
+        assert!(v.ok, "校验失败: {:?}", v.errors);
+        let s1 = read_part(&out, "ppt/slides/slide1.xml");
+        assert!(s1.contains("<a:tbl>"), "必须是真 a:tbl 表格,不是形状拼的");
+        assert!(s1.contains("graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/table\""));
+        assert_eq!(s1.matches("<a:gridCol").count(), 3, "3 列");
+        assert_eq!(s1.matches("<a:tr ").count(), 4, "4 行");
+        assert!(s1.contains("firstRow=\"1\""), "首行表头标记");
+        // widths 2:1:1 → 首列 400px EMU,尾列吃余数
+        assert!(s1.contains(&format!("<a:gridCol w=\"{}\"/>", 400 * PX)), "按 widths 分列宽");
+        // 表头用强调色底,单元格文字都在
+        assert!(s1.contains("科目") && s1.contains("30%"));
+        assert!(s1.contains("val=\"1F6FD6\""), "tech-blue 强调色进表头");
+        // 空 rows 告警不崩
+        let spec2 = r#"{"slides":[{"layout":"freeform","boxes":[{"type":"table","x":0,"y":0,"w":100,"h":100}]}]}"#;
+        let out2 = dir.join("tbl2.pptx");
+        let r2 = build_pptx_from_spec(spec2, &out2.to_string_lossy()).expect("空表不崩");
+        assert!(r2["warnings"].as_array().unwrap().iter().any(|x| x.as_str().unwrap().contains("表格缺 rows")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn freeform_chart_exports_shape_groups() {
+        let dir = std::env::temp_dir().join("polaris_native_pptx_chart");
+        let _ = std::fs::create_dir_all(&dir);
+        let out = dir.join("chart.pptx");
+        let spec = r##"{"theme":"forest","slides":[
+            {"layout":"freeform","boxes":[
+                {"type":"chart","chartType":"bar","x":60,"y":80,"w":540,"h":360,"title":"班级平均分",
+                 "labels":["一班","二班","三班"],"series":[82,91,76]},
+                {"type":"chart","chartType":"donut","x":660,"y":80,"w":540,"h":360,
+                 "labels":["满意","一般","差评"],"series":[455,655,160]}
+            ]},
+            {"layout":"freeform","boxes":[
+                {"type":"chart","chartType":"line","x":60,"y":80,"w":600,"h":400,
+                 "labels":["3月","4月","5月","6月"],"series":[[60,72,68,88],[55,61,70,74]],"names":["实验班","对照班"]},
+                {"type":"chart","chartType":"pie","x":700,"y":80,"w":500,"h":400,
+                 "labels":["甲","乙"],"series":[3,7]}
+            ]}
+        ]}"##;
+        let r = build_pptx_from_spec(spec, &out.to_string_lossy()).expect("应成功");
+        assert_eq!(r["warnings"].as_array().unwrap().len(), 0, "不应有告警: {:?}", r["warnings"]);
+        let v = crate::forge::pptx::validate_pptx(&out.to_string_lossy()).unwrap();
+        assert!(v.ok, "校验失败: {:?}", v.errors);
+        let s1 = read_part(&out, "ppt/slides/slide1.xml");
+        // bar:标题 + 3 根柱(矩形) + 底线 + 数值/类目标签
+        assert!(s1.contains("班级平均分"));
+        assert!(s1.contains("一班") && s1.contains("82"));
+        // donut:blockArc 切片 + 图例(值与占比)
+        assert!(s1.contains("prst=\"blockArc\""), "环形图用 blockArc");
+        assert!(s1.contains("满意 455(36%)"), "环形图图例带值与占比");
+        let s2 = read_part(&out, "ppt/slides/slide2.xml");
+        // line:两条 custGeom 折线 + 数据点圆 + 系列图例
+        assert!(s2.contains("<a:custGeom>"), "折线用 custGeom");
+        assert!(s2.contains("实验班") && s2.contains("对照班"));
+        // pie:真 pie 预置形状
+        assert!(s2.contains("prst=\"pie\""), "饼图用预置 pie");
+        // 缺数据:告警不崩
+        let bad = r#"{"slides":[{"layout":"freeform","boxes":[{"type":"chart","chartType":"bar","x":0,"y":0,"w":300,"h":200}]}]}"#;
+        let out2 = dir.join("chart2.pptx");
+        let r2 = build_pptx_from_spec(bad, &out2.to_string_lossy()).expect("坏图表不崩");
+        assert!(r2["warnings"].as_array().unwrap().iter().any(|x| x.as_str().unwrap().contains("图表数据不全")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn transition_and_rich_anim_land_in_ooxml() {
+        let dir = std::env::temp_dir().join("polaris_native_pptx_m4");
+        let _ = std::fs::create_dir_all(&dir);
+        let out = dir.join("m4.pptx");
+        let spec = r##"{"theme":"minimal-white","slides":[
+            {"layout":"title","title":"封面","transition":{"type":"push","dir":"up","speed":"fast"}},
+            {"layout":"freeform","transition":{"type":"fade"},"boxes":[
+                {"type":"text","x":100,"y":100,"w":600,"h":80,"text":"飞入的标题","size":32,
+                 "anim":{"effect":"fly-in","dir":"up","dur":600}},
+                {"type":"rect","x":100,"y":300,"w":300,"h":60,"color":"accent",
+                 "anim":{"effect":"zoom","trigger":"with"}},
+                {"type":"text","x":100,"y":420,"w":600,"h":60,"text":"强调脉冲","size":20,
+                 "anim":{"effect":"pulse","trigger":"click","dur":400}},
+                {"type":"card","x":600,"y":300,"w":200,"h":100,
+                 "anim":{"effect":"fade-out","trigger":"after"}}
+            ]}
+        ]}"##;
+        let r = build_pptx_from_spec(spec, &out.to_string_lossy()).expect("应成功");
+        assert_eq!(r["warnings"].as_array().unwrap().len(), 0, "不应有告警: {:?}", r["warnings"]);
+        let v = crate::forge::pptx::validate_pptx(&out.to_string_lossy()).unwrap();
+        assert!(v.ok, "校验失败: {:?}", v.errors);
+        let s1 = read_part(&out, "ppt/slides/slide1.xml");
+        assert!(s1.contains("<p:transition spd=\"fast\"><p:push dir=\"u\"/></p:transition>"), "推入切换");
+        let s2 = read_part(&out, "ppt/slides/slide2.xml");
+        assert!(s2.contains("<p:transition spd=\"med\"><p:fade/></p:transition>"), "淡入切换默认中速");
+        // 富动画:飞入(位移公式)+ 同步缩放 + 脉冲(autoRev)+ after 淡出(结尾隐藏)
+        assert!(s2.contains("<p:timing>") && s2.contains("nodeType=\"mainSeq\""));
+        assert!(s2.contains("1+#ppt_h/2"), "fly-in 自底部的位移公式");
+        assert!(s2.contains("presetClass=\"entr\" presetSubtype=\"0\" fill=\"hold\" grpId=\"0\" nodeType=\"withEffect\""), "with 同步触发");
+        assert!(s2.contains("autoRev=\"1\""), "pulse 往返");
+        assert!(s2.contains("presetClass=\"exit\""), "退出类动画");
+        assert!(s2.contains("<p:to><p:strVal val=\"hidden\"/></p:to>"), "退出后隐藏");
+        assert_eq!(s2.matches("<p:cond delay=\"indefinite\"/>").count(), 2, "两次单击(fly-in+with 一步,pulse+after 一步)");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
