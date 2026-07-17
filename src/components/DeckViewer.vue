@@ -9,12 +9,13 @@
 import { computed, ref, watch, onBeforeUnmount, nextTick } from "vue";
 import {
   ChevronLeft, ChevronRight, Loader, PencilLine, Check, Play, Copy, Trash2,
-  ArrowUp, ArrowDown, Plus, Undo2, StickyNote, X,
+  ArrowUp, ArrowDown, Plus, Undo2, StickyNote, X, Unlock, MousePointer2,
 } from "@lucide/vue";
 import {
   specSlidesRender, setSpecText, getSpecText, NEW_SLIDE_LAYOUTS,
-  type SlideSpec, type SlideOp,
+  type SlideSpec, type SlideOp, type FreeBox,
 } from "../lib/slidesSpec";
+import FreeformEditor from "./FreeformEditor.vue";
 
 const props = defineProps<{
   /** 已把图片换成 dataURL 的 spec 对象(resolveSpecImages 之后)。 */
@@ -76,6 +77,7 @@ function onKey(e: KeyboardEvent) {
     if (props.canUndo) emit("undo");
   } else if ([" ", "ArrowRight", "ArrowDown", "PageDown"].includes(e.key)) {
     e.preventDefault();
+    if (presenting.value && advanceShow()) return; // 放映中:先把本页的分步动画走完
     go(page.value + 1, true);
   } else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) {
     e.preventDefault();
@@ -89,11 +91,133 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
+// ───────── 放映:页面切换动画(与导出的 <p:transition> 同构) ─────────
+// 单层舞台没有「旧页」可动:cover 近似成 push、uncover 近似成 fade —— 导出到 PowerPoint
+// 放映才是完整效果,这里保证「有动、方向对、时长对」。
+const curTransition = computed(() => (props.spec as any)?.slides?.[page.value]?.transition ?? null);
+const showFitClass = computed(() => {
+  const t = curTransition.value;
+  if (!t?.type) return "";
+  const base: Record<string, string> = {
+    fade: "t-fade", "fade-black": "t-fade", push: "t-push", cover: "t-push", uncover: "t-fade", zoom: "t-zoom",
+  };
+  const cls = base[t.type] ?? "";
+  return cls === "t-push" ? `t-push t-${t.dir ?? "up"}` : cls;
+});
+const showDur = computed(
+  () => (({ fast: "0.35s", slow: "1s" }) as Record<string, string>)[curTransition.value?.speed ?? ""] ?? "0.6s"
+);
+
+// ───────── 放映:元素动画分步播放 ─────────
+// 与引擎 build_timing_rich 同一套步骤模型:legacy data-click 组(升序)在前,
+// data-anim 的盒子按 DOM 顺序在后;click 开新步,with/after 并入上一步。
+// 进入类元素初始隐藏,推进到那一步才带 CSS 效果显现;强调类原地播;退出类播完隐藏。
+type ShowFx = { el: HTMLElement; effect: string; dur: number; dir: string };
+const showSteps = ref<ShowFx[][]>([]);
+const showStepIdx = ref(0);
+const ENTR = new Set(["appear", "fade", "fly-in", "float-in", "wipe", "zoom"]);
+const EXIT = new Set(["fade-out", "fly-out", "zoom-out", "disappear"]);
+/** 从渲染 DOM 收集分步动画(放映与舞台内预览共用同一套步骤模型)。 */
+function buildAnimSteps(host: HTMLElement): ShowFx[][] {
+  const steps: ShowFx[][] = [];
+  // legacy click 组
+  const clicked = [...host.querySelectorAll<HTMLElement>("[data-click]")];
+  const nums = [...new Set(clicked.map((el) => Number(el.dataset.click) || 0))].filter((n) => n > 0).sort((a, b) => a - b);
+  for (const n of nums)
+    steps.push(clicked.filter((el) => Number(el.dataset.click) === n).map((el) => ({ el, effect: "fade", dur: 400, dir: "" })));
+  // 富动画盒子(DOM 顺序 = boxes 顺序)
+  for (const el of host.querySelectorAll<HTMLElement>("[data-anim]")) {
+    const fx: ShowFx = {
+      el,
+      effect: el.dataset.anim ?? "fade",
+      dur: Number(el.dataset.animdur) || 500,
+      dir: el.dataset.animdir ?? "up",
+    };
+    const trig = el.dataset.animtrig ?? "click";
+    if (trig === "click" || !steps.length) steps.push([fx]);
+    else steps[steps.length - 1].push(fx);
+  }
+  return steps;
+}
+/** 进入类初始隐藏(visibility 保占位,与引擎 set style.visibility 同义)。 */
+function hideEntrances(steps: ShowFx[][]) {
+  for (const group of steps)
+    for (const fx of group) if (ENTR.has(fx.effect) || fx.el.dataset.click) fx.el.style.visibility = "hidden";
+}
+/** 播一组效果(放映推进与预览自动播共用)。 */
+function playGroup(group: ShowFx[]) {
+  for (const fx of group) {
+    const el = fx.el;
+    el.style.setProperty("--kdur", `${fx.dur}ms`);
+    if (ENTR.has(fx.effect) || el.dataset.click) el.style.visibility = "";
+    el.classList.remove(...[...el.classList].filter((c) => c.startsWith("kfx")));
+    // 强制重排,同一元素连续两次动画(强调)才会重播
+    void el.offsetWidth;
+    el.classList.add("kfx", `kfx-${fx.effect}`, `kdir-${fx.dir || "up"}`);
+    if (EXIT.has(fx.effect)) {
+      const dur = fx.effect === "disappear" ? 0 : fx.dur;
+      window.setTimeout(() => (el.style.visibility = "hidden"), dur);
+    }
+  }
+}
+function prepShowAnims() {
+  showSteps.value = [];
+  showStepIdx.value = 0;
+  const host = showEl.value?.querySelector(".dkv-show-fit") as HTMLElement | null;
+  if (!host) return;
+  const steps = buildAnimSteps(host);
+  hideEntrances(steps);
+  showSteps.value = steps;
+}
+/** 推进一步;没有剩余步骤返回 false(调用方翻页)。 */
+function advanceShow(): boolean {
+  const i = showStepIdx.value;
+  if (i >= showSteps.value.length) return false;
+  playGroup(showSteps.value[i]);
+  showStepIdx.value = i + 1;
+  return true;
+}
+function onShowNext() {
+  if (!advanceShow()) go(page.value + 1, true);
+}
+
+// ── 舞台内动画预览(动画面板「预览」按钮):不进全屏,原位自动播完并复原 ──
+const previewingAnims = ref(false);
+async function previewAnims() {
+  if (previewingAnims.value) return;
+  const host = stageEl.value?.querySelector(".dkv-fit") as HTMLElement | null;
+  if (!host) return;
+  const steps = buildAnimSteps(host);
+  if (!steps.length) return;
+  previewingAnims.value = true;
+  hideEntrances(steps);
+  const wait = (ms: number) => new Promise((res) => window.setTimeout(res, ms));
+  await wait(280); // 先让「都藏起来」被看见,预览才有起点感
+  for (const group of steps) {
+    playGroup(group);
+    const dur = Math.max(...group.map((g) => g.dur), 300);
+    await wait(dur + 380);
+  }
+  // 复原:清效果类与内联可见性(退出类藏掉的也一并恢复 —— 预览不是放映,不留终态)
+  for (const group of steps)
+    for (const fx of group) {
+      fx.el.classList.remove(...[...fx.el.classList].filter((c) => c.startsWith("kfx") || c.startsWith("kdir")));
+      fx.el.style.visibility = "";
+    }
+  previewingAnims.value = false;
+}
+
 // ───────── 放映 ─────────
 // 全屏只放当前页那一张 .sl —— 复用同一份页面 HTML(cqw 字号自动等比撑满),
 // 不需要另做一套放映渲染。翻页/退出走同一个 onKey,所以放映态天然继承所有快捷键。
 const presenting = ref(false);
 const showEl = ref<HTMLElement | null>(null);
+// 进入放映/放映中换页:重建分步动画(旧页残留的 kfx 类随 :key 重建自然消失)
+watch([presenting, page], async ([p]) => {
+  if (!p) return;
+  await nextTick();
+  prepShowAnims();
+});
 async function present() {
   if (!pages.value.length) return;
   presenting.value = true;
@@ -174,9 +298,25 @@ function onDragEnd() {
   dragOver.value = null;
 }
 
+// ───────── 舞台缩放(豆包式 − % +,Ctrl+滚轮) ─────────
+const zoom = ref(100);
+function setZoom(v: number) {
+  zoom.value = Math.max(50, Math.min(200, Math.round(v)));
+}
+function onStageWheel(e: WheelEvent) {
+  if (!e.ctrlKey) return; // 普通滚轮留给放大后的画布滚动
+  e.preventDefault();
+  setZoom(zoom.value + (e.deltaY > 0 ? -10 : 10));
+}
+// 100cqh 基准宽 × zoom;超出舞台就地滚动(.dkv-stage overflow:auto + margin:auto 居中)
+const stageFitStyle = computed(() => ({
+  width: `calc(min(100%, (100cqh - 32px) * 1.77778) * ${zoom.value / 100})`,
+  flexShrink: 0 as const,
+}));
+
 // ───────── 演讲者备注 ─────────
-// spec 每页本就有 notes(口播稿),此前只进导出、界面上看不见也改不了。
-const notesOpen = ref(false);
+// spec 每页本就有 notes(口播稿),教师场景里它是一等公民 → 常驻可折叠(默认开)。
+const notesOpen = ref(true);
 const notesDraft = ref("");
 const curNotes = computed(() => String((props.spec as any)?.slides?.[page.value]?.notes ?? ""));
 // 切页/换 spec 时把草稿同步过来(用户正在打字时不抢,否则会吞掉刚敲的字)
@@ -194,6 +334,81 @@ function saveNotes() {
   op({ kind: "notes", index: page.value, value: notesDraft.value });
 }
 
+// ───────── 自由编辑(元素级) ─────────
+// 语义页先「解锁」成 freeform(不可逆,弹一次确认);freeform 页直接进覆盖层编辑。
+const curSlide = computed(() => (props.spec as any)?.slides?.[page.value] as any);
+const curIsFreeform = computed(() => String(curSlide.value?.layout ?? "") === "freeform");
+const curBoxes = computed<FreeBox[]>(() => (Array.isArray(curSlide.value?.boxes) ? curSlide.value.boxes : []));
+const freeEdit = ref(false);
+const unlockAsk = ref(false);
+const ffeRef = ref<InstanceType<typeof FreeformEditor> | null>(null);
+function toggleFreeEdit() {
+  if (!canOp.value) return;
+  if (freeEdit.value) {
+    freeEdit.value = false;
+    return;
+  }
+  editing.value = false; // 与改字模式互斥
+  if (curIsFreeform.value) freeEdit.value = true;
+  else unlockAsk.value = true; // 语义页:先确认(解锁后不再 autofit,不可逆)
+}
+function confirmUnlock() {
+  unlockAsk.value = false;
+  op({ kind: "freeform", index: page.value });
+  freeEdit.value = true;
+}
+// 换页/生成中退出自由编辑(每页各自解锁,不跨页粘住)
+watch(page, () => {
+  freeEdit.value = false;
+  unlockAsk.value = false;
+});
+watch(
+  () => props.generating,
+  (g) => {
+    if (g) freeEdit.value = false;
+  }
+);
+function onFfPatch(i: number, patch: Partial<FreeBox>) {
+  op({ kind: "box-set", index: page.value, box: i, patch });
+}
+function onFfMove(boxes: number[], dx: number, dy: number) {
+  op({ kind: "boxes-move", index: page.value, boxes, dx, dy });
+}
+function onFfDel(boxes: number[]) {
+  op({ kind: "boxes-del", index: page.value, boxes });
+  ffeRef.value?.select(null);
+}
+function onFfDup(i: number) {
+  const b = curBoxes.value[i];
+  if (!b) return;
+  const copy = JSON.parse(JSON.stringify(b));
+  if (typeof copy.x === "number") copy.x += 16;
+  if (typeof copy.y === "number") copy.y += 16;
+  if (typeof copy.x2 === "number") copy.x2 += 16;
+  if (typeof copy.y2 === "number") copy.y2 += 16;
+  if (Array.isArray(copy.points)) copy.points = copy.points.map((p: any) => (Array.isArray(p) ? [p[0] + 16, p[1] + 16] : p));
+  op({ kind: "box-add", index: page.value, boxSpec: copy });
+}
+function onFfZ(i: number, dir: "up" | "down" | "top" | "bottom") {
+  op({ kind: "box-z", index: page.value, box: i, dir });
+}
+/** 插入新元素(顶部工具条调):落画布中央,插完自动选中。 */
+function addBox(box: FreeBox) {
+  if (!canOp.value || !curIsFreeform.value) return;
+  op({ kind: "box-add", index: page.value, boxSpec: box });
+}
+/** 选中盒子的下标(格式面板读)。 */
+const selBoxIdx = computed(() => (freeEdit.value ? ffeRef.value?.sel ?? null : null));
+
+/** 动画面板顺序列表点行选中对应盒子(仅自由编辑态)。 */
+function selectBox(i: number) {
+  if (freeEdit.value) ffeRef.value?.select(i);
+}
+
+// 标题栏(父组件)要调放映/缩放,格式面板要读当前页号/选中盒子,工具条要插元素,
+// 动画面板要预览/按序选中
+defineExpose({ present, page, zoom, setZoom, freeEdit, curIsFreeform, selBoxIdx, addBox, previewAnims, previewingAnims, selectBox });
+
 // ───────── 点字直改 ─────────
 // 只改文字,不动版式 —— autofit 仍然生效,所以用户**改不坏排版**(这正是"版式态"的红利:
 // 豆包没有重排引擎、改字就溢出,我们改完自动重算字号)。
@@ -203,6 +418,7 @@ const dirty = ref(false); // 有未落盘的改动(纯提示)
 const stageEl = ref<HTMLElement | null>(null);
 
 function onStageClick(e: MouseEvent) {
+  if (freeEdit.value) return; // 自由编辑态:点击交给覆盖层,不翻页
   if (!editing.value) {
     go(page.value + 1, true); // 非编辑态:点击翻页(原行为)
     return;
@@ -250,6 +466,7 @@ function toggleEdit() {
     (stageEl.value?.querySelector("[contenteditable='true']") as HTMLElement | null)?.blur();
   }
   editing.value = !editing.value;
+  if (editing.value) freeEdit.value = false; // 改字与自由编辑互斥,同时开点击语义会打架
 }
 // 生成中不许编辑(spec 每 3s 被重写,改了也会被覆盖)
 watch(
@@ -303,6 +520,13 @@ onBeforeUnmount(() => {
 <template>
   <div class="dkv" :class="SCOPE" tabindex="0" @keydown="onKey">
     <aside ref="railEl" class="dkv-rail">
+      <!-- 新建幻灯片:豆包位(栏顶)。选版式后插在当前页之后,占位内容直接点字改 -->
+      <div v-if="canOp" class="dkv-add">
+        <button class="dkv-add-btn" @click.stop="addOpen = !addOpen"><Plus :size="12" /> 新建幻灯片</button>
+        <div v-if="addOpen" class="dkv-add-menu">
+          <button v-for="l in NEW_SLIDE_LAYOUTS" :key="l.id" @click="addSlide(l.id)">{{ l.name }}</button>
+        </div>
+      </div>
       <div
         v-for="(h, i) in pages"
         :key="i"
@@ -328,23 +552,31 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div v-if="generating" class="dkv-pending">下一页生成中…</div>
-      <!-- 加页:选版式后插在当前页之后,占位内容直接点字改 -->
-      <div v-if="canOp" class="dkv-add">
-        <button class="dkv-add-btn" @click.stop="addOpen = !addOpen"><Plus :size="12" /> 加一页</button>
-        <div v-if="addOpen" class="dkv-add-menu">
-          <button v-for="l in NEW_SLIDE_LAYOUTS" :key="l.id" @click="addSlide(l.id)">{{ l.name }}</button>
-        </div>
-      </div>
     </aside>
     <main class="dkv-main">
       <div
         ref="stageEl"
         class="dkv-stage"
         :class="{ editing }"
-        :title="editing ? '点任意文字即可修改 · Enter 保存 · Esc 撤销' : '点击翻下一页 · ←→ 翻页'"
+        :title="freeEdit ? '自由编辑：拖拽移动 · 拉手柄缩放 · 双击文本改字 · Del 删除' : editing ? '点任意文字即可修改 · Enter 保存 · Esc 撤销' : '点击翻下一页 · ←→ 翻页 · Ctrl+滚轮缩放'"
         @click="onStageClick"
+        @wheel="onStageWheel"
       >
-        <div class="dkv-fit stage" v-html="pages[page] ?? ''"></div>
+        <div class="dkv-fit stage rel" :style="stageFitStyle">
+          <div v-html="pages[page] ?? ''"></div>
+          <FreeformEditor
+            v-if="freeEdit && curIsFreeform && canOp"
+            ref="ffeRef"
+            :boxes="curBoxes"
+            :stage-host="stageEl"
+            @patch="onFfPatch"
+            @move="onFfMove"
+            @del="onFfDel"
+            @dup="onFfDup"
+            @z="onFfZ"
+            @text-edit="beginEdit"
+          />
+        </div>
       </div>
       <!-- 演讲者备注:spec 里本就有 notes(口播稿),此前只进导出、界面上摸不着 -->
       <div v-if="notesOpen" class="dkv-notes">
@@ -391,6 +623,16 @@ onBeforeUnmount(() => {
         <button
           v-if="editable && !generating"
           class="dkv-btn"
+          :class="{ on: freeEdit }"
+          :title="curIsFreeform ? '元素级编辑：拖拽/缩放/删除本页元素' : '把本页解锁成自由版式后可拖拽元素（不可逆）'"
+          @click.stop="toggleFreeEdit"
+        >
+          <component :is="curIsFreeform ? MousePointer2 : Unlock" :size="12" />
+          {{ freeEdit ? "完成编辑" : "自由编辑" }}
+        </button>
+        <button
+          v-if="editable && !generating"
+          class="dkv-btn"
           title="撤销上一步（Ctrl+Z）"
           :disabled="!canUndo"
           @click.stop="emit('undo')"
@@ -401,6 +643,15 @@ onBeforeUnmount(() => {
         <span v-else-if="dirty" class="dkv-tip ok">已保存改动</span>
         <span v-if="generating" class="dkv-gen"><Loader :size="12" class="dkv-spin" /> 生成中…</span>
       </div>
+      <!-- 解锁确认:挂在主区而非底栏内 —— 底栏 overflow:hidden 会把向上弹的层整个剪没
+           (真实用户点不到「解锁并编辑」,验证抓到的 bug)。 -->
+      <div v-if="unlockAsk" class="dkv-unlock" @click.stop>
+        <p>把本页展开成<b>自由版式</b>：元素可拖拽/缩放，但此后<b>不再自动重排</b>（不可逆，可 Ctrl+Z 撤销这一步）。</p>
+        <div class="dkv-unlock-btns">
+          <button class="ok" @click="confirmUnlock">解锁并编辑</button>
+          <button @click="unlockAsk = false">取消</button>
+        </div>
+      </div>
     </main>
 
     <!-- 放映:全屏只放当前页那一张,复用同一份页面 HTML(cqw 字号自动等比撑满) -->
@@ -409,10 +660,17 @@ onBeforeUnmount(() => {
       ref="showEl"
       class="dkv-show"
       tabindex="0"
-      @keydown="onKey"
-      @click="go(page + 1, true)"
+      @keydown.stop="onKey"
+      @click="onShowNext"
     >
-      <div class="dkv-fit dkv-show-fit" v-html="pages[page] ?? ''"></div>
+      <!-- :key=page → 换页重建元素,切换动画随之重播 -->
+      <div
+        :key="page"
+        class="dkv-fit dkv-show-fit"
+        :class="showFitClass"
+        :style="{ '--tdur': showDur }"
+        v-html="pages[page] ?? ''"
+      ></div>
       <div class="dkv-show-bar" @click.stop>
         <span>{{ page + 1 }} / {{ pages.length }}</span>
         <button title="退出放映（Esc）" @click="exitPresent"><X :size="13" /></button>
@@ -442,16 +700,18 @@ onBeforeUnmount(() => {
 .dkv-add { position: relative; flex-shrink: 0; }
 .dkv-add-btn { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 7px; border: 1px dashed rgba(255, 255, 255, 0.28); border-radius: 7px; background: transparent; color: #c9c9cf; font-size: 11.5px; cursor: pointer; }
 .dkv-add-btn:hover { border-color: var(--primary, #7fa8d4); color: #fff; }
-.dkv-add-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); z-index: 5; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 4px; border-radius: 7px; background: #33333a; border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+.dkv-add-menu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 4px; border-radius: 7px; background: #33333a; border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
 .dkv-add-menu button { padding: 6px 4px; border: none; border-radius: 5px; background: transparent; color: #d8d8de; font-size: 11px; cursor: pointer; }
 .dkv-add-menu button:hover { background: var(--primary, #7fa8d4); color: #fff; }
 .dkv-n { position: absolute; left: 5px; top: 5px; z-index: 2; font-size: 10px; line-height: 1; padding: 3px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.55); color: #fff; font-weight: 600; }
 .dkv-pending { aspect-ratio: 16/9; border-radius: 6px; border: 1.5px dashed rgba(255, 255, 255, 0.32); display: flex; align-items: center; justify-content: center; color: rgba(255, 255, 255, 0.6); font-size: 11px; animation: dkv-pulse 1.25s ease-in-out infinite; flex-shrink: 0; }
 @keyframes dkv-pulse { 50% { opacity: 0.4; } }
 .dkv-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-/* container-type:size → 100cqh 可用容器高算出 16:9 下的最大宽,宽高双约束下不溢出 */
-.dkv-stage { flex: 1; min-height: 0; cursor: pointer; container-type: size; display: grid; place-items: center; padding: 16px; }
-.dkv-stage .dkv-fit { width: min(100%, calc((100cqh - 32px) * 1.77778)); }
+/* container-type:size → 100cqh 可用容器高算出 16:9 下的最大宽,宽高双约束下不溢出。
+   flex + margin:auto 而非 grid place-items:缩放超过 100% 时内容大于容器要能滚动,
+   grid 居中会把左上角剪出视野,margin:auto 双向都安全。 */
+.dkv-stage { flex: 1; min-height: 0; cursor: pointer; container-type: size; display: flex; overflow: auto; padding: 16px; }
+.dkv-stage .dkv-fit { width: min(100%, calc((100cqh - 32px) * 1.77778)); margin: auto; }
 /* 抽屉窄时也绝不换行:按钮一律 nowrap + 不收缩,提示语可省略号截断 */
 .dkv-bar { height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 10px; color: #c9c9cf; font-size: 12.5px; user-select: none; overflow: hidden; }
 .dkv-btn { display: inline-flex; align-items: center; gap: 3px; border: 1px solid rgba(255, 255, 255, 0.22); background: rgba(255, 255, 255, 0.06); color: #e4e4e8; border-radius: 7px; padding: 5px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
@@ -478,6 +738,17 @@ onBeforeUnmount(() => {
   background: rgba(127, 168, 212, 0.14);
 }
 .dkv-btn.on { background: var(--primary, #7fa8d4); border-color: var(--primary, #7fa8d4); color: #fff; }
+/* v-html 渲染区 + 自由编辑覆盖层的公共定位锚 */
+.dkv-fit.rel { position: relative; }
+/* 解锁确认:锚在 .dkv-main(position:relative)上,贴底栏上缘居中 —— 不进底栏子树,
+   否则被 .dkv-bar 的 overflow:hidden 整个剪没 */
+.dkv-main { position: relative; }
+.dkv-unlock { position: absolute; bottom: 52px; left: 50%; transform: translateX(-50%); z-index: 8; width: 262px; padding: 12px; border-radius: 9px; background: #2e2e34; border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
+.dkv-unlock p { margin: 0 0 10px; font-size: 11.5px; line-height: 1.6; color: #d8d8de; text-align: left; white-space: normal; }
+.dkv-unlock b { color: #fff; }
+.dkv-unlock-btns { display: flex; gap: 6px; justify-content: flex-end; }
+.dkv-unlock-btns button { padding: 5px 12px; border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 6px; background: rgba(255, 255, 255, 0.06); color: #e4e4e8; font-size: 11.5px; cursor: pointer; }
+.dkv-unlock-btns button.ok { background: var(--primary, #7fa8d4); border-color: var(--primary, #7fa8d4); color: #fff; font-weight: 600; }
 /* 本页已有备注的小红点:不用数字、不用文案,一眼可见哪页写过口播稿 */
 .dkv-dot { display: inline-block; width: 5px; height: 5px; margin-left: 4px; border-radius: 50%; background: #6cbf8f; vertical-align: middle; }
 /* 备注条:舞台与工具条之间的一横条,不抢舞台高度 */
@@ -492,6 +763,62 @@ onBeforeUnmount(() => {
 .dkv-show { position: fixed; inset: 0; z-index: 60; background: #000; display: grid; place-items: center; cursor: pointer; outline: none; container-type: size; }
 .dkv-show-fit { width: min(100%, calc(100cqh * 1.77778)); }
 .dkv-show-fit :deep(.sl) { border-radius: 0; }
+/* 页面切换动画(与导出 <p:transition> 同构;--tdur 由 speed 字段给) */
+.dkv-show-fit.t-fade { animation: dkv-t-fade var(--tdur, 0.6s) ease both; }
+.dkv-show-fit.t-zoom { animation: dkv-t-zoom var(--tdur, 0.6s) ease both; }
+.dkv-show-fit.t-push.t-up { animation: dkv-t-up var(--tdur, 0.6s) cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+.dkv-show-fit.t-push.t-down { animation: dkv-t-down var(--tdur, 0.6s) cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+.dkv-show-fit.t-push.t-left { animation: dkv-t-left var(--tdur, 0.6s) cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+.dkv-show-fit.t-push.t-right { animation: dkv-t-right var(--tdur, 0.6s) cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+@keyframes dkv-t-fade { from { opacity: 0; } }
+@keyframes dkv-t-zoom { from { opacity: 0; transform: scale(0.82); } }
+/* ── 元素动画播放(与引擎 anim 效果同构;--kdur 由 data-animdur 给) ── */
+.dkv :deep(.kfx) { animation-duration: var(--kdur, 0.5s); animation-fill-mode: both; animation-timing-function: ease; }
+.dkv :deep(.kfx-appear) { animation: none; }
+.dkv :deep(.kfx-fade) { animation-name: kfx-fade; }
+.dkv :deep(.kfx-float-in) { animation-name: kfx-float; }
+.dkv :deep(.kfx-zoom) { animation-name: kfx-zoom; }
+.dkv :deep(.kfx-fly-in.kdir-up) { animation-name: kfx-fly-up; }
+.dkv :deep(.kfx-fly-in.kdir-down) { animation-name: kfx-fly-down; }
+.dkv :deep(.kfx-fly-in.kdir-left) { animation-name: kfx-fly-left; }
+.dkv :deep(.kfx-fly-in.kdir-right) { animation-name: kfx-fly-right; }
+.dkv :deep(.kfx-wipe.kdir-up) { animation-name: kfx-wipe-up; }
+.dkv :deep(.kfx-wipe.kdir-down) { animation-name: kfx-wipe-down; }
+.dkv :deep(.kfx-wipe.kdir-left) { animation-name: kfx-wipe-left; }
+.dkv :deep(.kfx-wipe.kdir-right) { animation-name: kfx-wipe-right; }
+.dkv :deep(.kfx-pulse) { animation-name: kfx-pulse; }
+.dkv :deep(.kfx-grow) { animation-name: kfx-grow; }
+.dkv :deep(.kfx-transparency) { animation-name: kfx-transp; }
+.dkv :deep(.kfx-fade-out) { animation-name: kfx-fade-out; }
+.dkv :deep(.kfx-zoom-out) { animation-name: kfx-zoom-out; }
+.dkv :deep(.kfx-fly-out.kdir-up) { animation-name: kfx-flyout-up; }
+.dkv :deep(.kfx-fly-out.kdir-down) { animation-name: kfx-flyout-down; }
+.dkv :deep(.kfx-fly-out.kdir-left) { animation-name: kfx-flyout-left; }
+.dkv :deep(.kfx-fly-out.kdir-right) { animation-name: kfx-flyout-right; }
+@keyframes kfx-fade { from { opacity: 0; } }
+@keyframes kfx-float { from { opacity: 0; transform: translateY(8%); } }
+@keyframes kfx-zoom { from { opacity: 0; transform: scale(0); } }
+@keyframes kfx-fly-up { from { transform: translateY(120vh); } }
+@keyframes kfx-fly-down { from { transform: translateY(-120vh); } }
+@keyframes kfx-fly-left { from { transform: translateX(120vw); } }
+@keyframes kfx-fly-right { from { transform: translateX(-120vw); } }
+@keyframes kfx-wipe-up { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
+@keyframes kfx-wipe-down { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+@keyframes kfx-wipe-left { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
+@keyframes kfx-wipe-right { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+@keyframes kfx-pulse { 50% { transform: scale(1.08); } }
+@keyframes kfx-grow { to { transform: scale(1.25); } }
+@keyframes kfx-transp { to { opacity: 0.4; } }
+@keyframes kfx-fade-out { to { opacity: 0; } }
+@keyframes kfx-zoom-out { to { opacity: 0; transform: scale(0); } }
+@keyframes kfx-flyout-up { to { transform: translateY(120vh); } }
+@keyframes kfx-flyout-down { to { transform: translateY(-120vh); } }
+@keyframes kfx-flyout-left { to { transform: translateX(120vw); } }
+@keyframes kfx-flyout-right { to { transform: translateX(-120vw); } }
+@keyframes dkv-t-up { from { opacity: 0.4; transform: translateY(55%); } }
+@keyframes dkv-t-down { from { opacity: 0.4; transform: translateY(-55%); } }
+@keyframes dkv-t-left { from { opacity: 0.4; transform: translateX(55%); } }
+@keyframes dkv-t-right { from { opacity: 0.4; transform: translateX(-55%); } }
 .dkv-show-bar { position: absolute; right: 18px; bottom: 16px; display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 20px; background: rgba(0, 0, 0, 0.55); color: #c9c9cf; font-size: 12.5px; opacity: 0; transition: opacity 0.2s; cursor: default; }
 .dkv-show:hover .dkv-show-bar { opacity: 1; }
 .dkv-show-bar button { display: inline-flex; border: none; background: transparent; color: #c9c9cf; cursor: pointer; padding: 2px; }

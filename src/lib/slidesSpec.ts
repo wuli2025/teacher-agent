@@ -44,7 +44,29 @@ export interface SlidePage {
   head?: string;
   /** freeform 专用:自由摆放的盒子(1280×720 逻辑 px 绝对定位)。 */
   boxes?: FreeBox[];
+  /** 页面切换动画(引擎写 <p:transition>,放映模式 CSS 同构)。 */
+  transition?: SlideTransition;
 }
+
+export interface SlideTransition {
+  /** fade | fade-black | push | cover | uncover | zoom */
+  type: string;
+  /** up | down | left | right(push/cover/uncover 用,语义=新页运动方向)。 */
+  dir?: string;
+  /** fast | med | slow(缺省 med)。 */
+  speed?: string;
+}
+
+/** 页面切换效果清单(UI 九宫格与放映 CSS 共用)。 */
+export const TRANSITIONS: { id: string; name: string; hasDir: boolean }[] = [
+  { id: "", name: "无", hasDir: false },
+  { id: "fade", name: "淡入", hasDir: false },
+  { id: "fade-black", name: "全黑淡入", hasDir: false },
+  { id: "push", name: "推入", hasDir: true },
+  { id: "cover", name: "覆盖", hasDir: true },
+  { id: "uncover", name: "揭开", hasDir: true },
+  { id: "zoom", name: "缩放", hasDir: false },
+];
 
 /**
  * freeform 盒子。与 pptx_native.rs 的 freeform 分支逐字段对齐(9 类 / 17 个 type 取值)。
@@ -77,15 +99,62 @@ export interface FreeBox {
   anchor?: string;
   bold?: boolean;
   italic?: boolean;
+  /** text 盒字体:"serif" 衬线,缺省黑体。只做二选,不开放全字体族。 */
+  font?: string;
+  /** 旋转角度 0–359(仅 div 类盒子:text/rect/card/scrim/image;SVG 线类不支持)。 */
+  rot?: number;
+  /** 整盒不透明度 0–100(图片盒不支持,两端一致跳过)。 */
+  opacity?: number;
   /** scrim 的不透明度 0–100,默认 50。 */
   alpha?: number;
   /** image 盒:预览前会被换成 data URL(同固定版式的 image 字段)。 */
   image?: string;
   cover?: boolean;
   rounded?: boolean;
+  /** table 盒:行×列文本(首行默认表头);widths 为各列相对宽度。 */
+  rows?: string[][];
+  header?: boolean;
+  widths?: number[];
+  /** chart 盒(形状化图表):bar|line|pie|donut + 类目 + 数据(单系列或多系列)。 */
+  chartType?: string;
+  labels?: string[];
+  series?: number[] | number[][];
+  names?: string[];
+  title?: string;
   /** 第 N 次单击时淡入(0/缺省=随页显示)。预览渲染全部盒子(= 动画播完的终态)。 */
   click?: number;
+  /** 富元素动画(引擎写真 p:timing,放映模式 CSS 同构播放)。 */
+  anim?: BoxAnim;
 }
+
+export interface BoxAnim {
+  /** 进入 appear|fade|fly-in|float-in|wipe|zoom · 强调 pulse|grow|transparency · 退出 fade-out|fly-out|zoom-out|disappear */
+  effect: string;
+  /** click(默认)|with(与上一效果同时)|after(上一效果之后)。 */
+  trigger?: string;
+  /** 毫秒,默认 500。 */
+  dur?: number;
+  delay?: number;
+  /** up|down|left|right(fly-in/fly-out/wipe 用)。 */
+  dir?: string;
+}
+
+/** 元素动画效果清单(面板 UI 与放映 CSS 共用)。 */
+export const BOX_ANIMS: { id: string; name: string; cls: "entr" | "emph" | "exit"; hasDir?: boolean }[] = [
+  { id: "appear", name: "出现", cls: "entr" },
+  { id: "fade", name: "淡化", cls: "entr" },
+  { id: "fly-in", name: "飞入", cls: "entr", hasDir: true },
+  { id: "float-in", name: "浮入", cls: "entr" },
+  { id: "wipe", name: "擦除", cls: "entr", hasDir: true },
+  { id: "zoom", name: "缩放", cls: "entr" },
+  { id: "pulse", name: "脉冲", cls: "emph" },
+  { id: "grow", name: "放大", cls: "emph" },
+  { id: "transparency", name: "透明", cls: "emph" },
+  { id: "fade-out", name: "淡出", cls: "exit" },
+  { id: "fly-out", name: "飞出", cls: "exit", hasDir: true },
+  { id: "zoom-out", name: "缩小消失", cls: "exit" },
+  { id: "disappear", name: "消失", cls: "exit" },
+];
 export interface SpecCol {
   head?: string;
   points?: (string | { text?: string; sub?: string[] })[];
@@ -212,7 +281,43 @@ export type SlideOp =
   | { kind: "del"; index: number }
   | { kind: "move"; index: number; to: number }
   | { kind: "add"; index: number; layout: string }
-  | { kind: "notes"; index: number; value: string };
+  | { kind: "notes"; index: number; value: string }
+  /** 解锁为自由版式:语义页展开成 freeform 盒子(不可逆,此后该页不再 autofit)。 */
+  | { kind: "freeform"; index: number }
+  /** 盒子级操作(仅 freeform 页):改字段 / 增 / 删 / 调层级。 */
+  | { kind: "box-set"; index: number; box: number; patch: Partial<FreeBox> }
+  | { kind: "box-add"; index: number; boxSpec: FreeBox }
+  | { kind: "box-del"; index: number; box: number }
+  | { kind: "box-z"; index: number; box: number; dir: "up" | "down" | "top" | "bottom" }
+  /** 页面切换动画:value=null 清除;all=true 应用到全部页。 */
+  | { kind: "transition"; index: number; value: SlideTransition | null; all?: boolean }
+  /** 多选批量:一次拖动/一次删除 = 一步撤销(拆成 N 个单盒 op 会灌爆撤销栈+重转 N 次)。 */
+  | { kind: "boxes-move"; index: number; boxes: number[]; dx: number; dy: number }
+  | { kind: "boxes-del"; index: number; boxes: number[] };
+
+/** 平移一个盒子(原地改):按类型把 dx/dy 写进正确的字段 —— 线挪端点、多边形挪点集。
+ *  编辑器与批量 op 共用,保证「单选拖」与「多选拖」落盘语义完全一致。 */
+export function moveFreeBox(b: FreeBox, dx: number, dy: number): void {
+  const t = String(b.type ?? "");
+  const n = (v: unknown, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const r = Math.round;
+  if (t === "line" || t === "arrow" || t === "axis") {
+    const x1 = n(b.x, 0), y1 = n(b.y, 0);
+    const x2 = n(b.x2, x1 + n(b.w, 100)), y2 = n(b.y2, y1);
+    b.x = r(x1 + dx); b.y = r(y1 + dy); b.x2 = r(x2 + dx); b.y2 = r(y2 + dy);
+    return;
+  }
+  if ((t === "polyline" || t === "curve" || t === "polygon") && Array.isArray(b.points)) {
+    b.points = (b.points as any[]).map((p) =>
+      Array.isArray(p) ? [r((Number(p[0]) || 0) + dx), r((Number(p[1]) || 0) + dy)]
+      : p && typeof p === "object" ? { x: r((Number((p as any).x) || 0) + dx), y: r((Number((p as any).y) || 0) + dy) }
+      : p
+    ) as any;
+    return;
+  }
+  b.x = r(n(b.x, 0) + dx);
+  b.y = r(n(b.y, 0) + dy);
+}
 
 /** 「加页」可选的版式 + 各自的占位内容(照 SKILL.md 的字段表填,加完即可点字改)。 */
 export const NEW_SLIDE_LAYOUTS: { id: string; name: string; make: () => SlidePage }[] = [
@@ -263,7 +368,291 @@ export function applySlideOp(spec: any, op: SlideOp): boolean {
       else delete sl.notes;
       return true;
     }
+    case "freeform": {
+      const boxes = expandToFreeform(slides[i]);
+      if (!boxes) return false; // 已是 freeform / 展不开:拒绝
+      slides[i] = { layout: "freeform", notes: slides[i].notes, boxes };
+      if (!slides[i].notes) delete slides[i].notes;
+      return true;
+    }
+    case "box-set": {
+      const boxes = (slides[i] as SlidePage).boxes;
+      const b = Array.isArray(boxes) ? boxes[op.box] : undefined;
+      if (!b) return false;
+      let changed = false;
+      for (const [k, v] of Object.entries(op.patch)) {
+        if ((b as any)[k] === v) continue;
+        if (v === undefined || v === null) delete (b as any)[k];
+        else (b as any)[k] = v;
+        changed = true;
+      }
+      return changed;
+    }
+    case "box-add": {
+      const sl = slides[i] as SlidePage;
+      if (sl.layout !== "freeform") return false;
+      if (!Array.isArray(sl.boxes)) sl.boxes = [];
+      sl.boxes.push(op.boxSpec);
+      return true;
+    }
+    case "box-del": {
+      const boxes = (slides[i] as SlidePage).boxes;
+      if (!Array.isArray(boxes) || op.box < 0 || op.box >= boxes.length) return false;
+      boxes.splice(op.box, 1);
+      return true;
+    }
+    case "box-z": {
+      const boxes = (slides[i] as SlidePage).boxes;
+      if (!Array.isArray(boxes) || op.box < 0 || op.box >= boxes.length) return false;
+      // freeform 的数组顺序即绘制顺序即 z 序(引擎同义)
+      const to =
+        op.dir === "top" ? boxes.length - 1
+        : op.dir === "bottom" ? 0
+        : op.dir === "up" ? op.box + 1
+        : op.box - 1;
+      if (to === op.box || to < 0 || to >= boxes.length) return false;
+      boxes.splice(to, 0, boxes.splice(op.box, 1)[0]);
+      return true;
+    }
+    case "transition": {
+      const apply = (sl: SlidePage) => {
+        if (op.value) sl.transition = { ...op.value };
+        else delete sl.transition;
+      };
+      if (op.all) slides.forEach(apply);
+      else apply(slides[i]);
+      return true;
+    }
+    case "boxes-move": {
+      const boxes = (slides[i] as SlidePage).boxes;
+      if (!Array.isArray(boxes) || (!op.dx && !op.dy)) return false;
+      const hit = op.boxes.filter((bi) => bi >= 0 && bi < boxes.length);
+      if (!hit.length) return false;
+      for (const bi of hit) moveFreeBox(boxes[bi], op.dx, op.dy);
+      return true;
+    }
+    case "boxes-del": {
+      const boxes = (slides[i] as SlidePage).boxes;
+      if (!Array.isArray(boxes)) return false;
+      // 降序删,下标才不会互相踩
+      const hit = [...new Set(op.boxes.filter((bi) => bi >= 0 && bi < boxes.length))].sort((a, b) => b - a);
+      if (!hit.length) return false;
+      for (const bi of hit) boxes.splice(bi, 1);
+      return true;
+    }
   }
+}
+
+// ───────── 解锁为自由版式:语义版式 → freeform 盒子(与引擎几何逐坐标对齐)─────────
+// 所有坐标直接抄自 pptx_native.rs 各版式分支(header 80,50,1120,64 / rule 80,122,72,4 /
+// 封面标题 80,268,1120,110 …),字号用同一套 autofit —— 解锁瞬间页面基本纹丝不动。
+// 颜色一律用色板词(ink/accent/muted/card/line/bg1),解锁后换肤仍然生效。
+// 已知取舍(freeform 文本盒单一字号/颜色,组合段落只能拆盒):
+//  · 卡片内容原本垂直居中,拆成 头/正文 两盒后改为顶对齐 —— 内容多的卡几乎无差,稀疏卡会上移;
+//  · bullet 圆点原是强调色,拆开后并入文字(前缀「• 」)成正文色;子条不再降 3pt。
+
+/** points → 文本行(「• 」/「  – 」前缀),与渲染器的 bullets 视觉对应。 */
+function pointsToLines(points: SlidePage["points"]): string[] {
+  const out: string[] = [];
+  if (!Array.isArray(points)) return out;
+  for (const p of points) {
+    if (typeof p === "string") out.push(`• ${p}`);
+    else if (p && typeof p === "object") {
+      if (p.text) out.push(`• ${p.text}`);
+      for (const s of p.sub ?? []) out.push(`　– ${s}`);
+    }
+  }
+  return out;
+}
+
+const tbox = (
+  x: number, y: number, w: number, h: number, size: number,
+  o: Partial<FreeBox> = {}
+): FreeBox => ({ type: "text", x, y, w, h, size, ...o });
+
+/** 语义版式页 → freeform 盒子数组;已是 freeform 或空页返回 null(拒绝解锁)。 */
+export function expandToFreeform(sl: SlidePage): FreeBox[] | null {
+  const layout = sl.layout ?? "bullets";
+  if (layout === "freeform") return null;
+  const B: FreeBox[] = [];
+  const header = () => {
+    if (!sl.title) return;
+    const size = autofit([{ em: emWidth(sl.title), rel: 0, after: 0 }], 1120, 64, 22, 32);
+    B.push(tbox(80, 50, 1120, 64, size, { text: sl.title, bold: true, color: "ink" }));
+    B.push({ type: "rect", x: 80, y: 122, w: 72, h: 4, color: "accent" });
+  };
+  const cover = (onImage: boolean) => {
+    const ink = onImage ? "white" : "ink";
+    const sub = onImage ? "#E8E8E8" : "muted";
+    if (sl.kicker)
+      B.push(tbox(160, 218, 960, 32, 17, { text: sl.kicker, bold: true, align: "center", color: onImage ? "white" : "accent" }));
+    const title = sl.title || (layout === "closing" ? "谢谢" : "");
+    B.push(tbox(80, 268, 1120, 110, coverTitleSize(title), { text: title, bold: true, align: "center", color: ink }));
+    B.push({ type: "rect", x: 598, y: 392, w: 84, h: 4, color: "accent" });
+    if (sl.subtitle)
+      B.push(tbox(160, 420, 960, 70, coverSubSize(sl.subtitle), { text: sl.subtitle, align: "center", color: sub }));
+  };
+  switch (layout) {
+    case "title":
+    case "closing":
+      cover(false);
+      break;
+    case "image-full":
+      B.push({ type: "image", x: 0, y: 0, w: 1280, h: 720, image: sl.image, cover: true });
+      B.push({ type: "scrim", x: 0, y: 0, w: 1280, h: 720, color: "black", alpha: 50 });
+      cover(true);
+      break;
+    case "section": {
+      B.push({ type: "rect", x: 80, y: 290, w: 8, h: 130, color: "accent" });
+      if (sl.kicker) B.push(tbox(116, 296, 1000, 32, 17, { text: sl.kicker, bold: true, color: "accent" }));
+      const t = sl.title ?? "";
+      const size = autofit([{ em: emWidth(t), rel: 0, after: 0 }], 1040, 90, 26, 44);
+      B.push(tbox(116, 336, 1040, 90, size, { text: t, bold: true, color: "ink" }));
+      break;
+    }
+    case "two-col": {
+      header();
+      const size = Math.min(
+        ...[sl.left, sl.right].filter(Boolean).map((c) => {
+          const fl: FitLine[] = [];
+          if (c!.head) fl.push({ em: emWidth(c!.head), rel: 2, after: 8 });
+          pointFitLines(c!.points, fl);
+          return autofit(fl, 488 - BULLET_INDENT, 414, 13, 24);
+        }),
+        24
+      );
+      [sl.left, sl.right].forEach((c, i) => {
+        if (!c) return;
+        const x = 80 + i * 576;
+        B.push({ type: "card", x, y: 168, w: 544, h: 470 });
+        let ty = 208;
+        if (c.head) {
+          B.push(tbox(x + 28, ty, 488, 40, size + 2, { text: c.head, bold: true, color: "accent" }));
+          ty += 52;
+        }
+        const lines = pointsToLines(c.points);
+        if (lines.length) B.push(tbox(x + 28, ty, 488, 638 - ty, size, { lines, color: "ink" }));
+      });
+      break;
+    }
+    case "compare": {
+      header();
+      const items = Array.isArray(sl.items) ? sl.items.slice(0, 4) : [];
+      const n = Math.max(1, items.length);
+      const w = Math.floor((1120 - 28 * (n - 1)) / n);
+      const size = Math.min(
+        ...items.map((it) => {
+          const fl: FitLine[] = [];
+          if (it.head) fl.push({ em: emWidth(it.head), rel: 3, after: 8 });
+          for (const l of (it.body ?? "").split("\n").filter((x) => x.trim()))
+            fl.push({ em: emWidth(l.trim()), rel: 0, after: 6 });
+          pointFitLines(it.points, fl);
+          return autofit(fl, w - 48 - BULLET_INDENT, 382, 11, 22);
+        }),
+        22
+      );
+      items.forEach((it, i) => {
+        const x = 80 + i * (w + 28);
+        B.push({ type: "card", x, y: 180, w, h: 430 });
+        let ty = 216;
+        if (it.head) {
+          B.push(tbox(x + 24, ty, w - 48, 42, size + 3, { text: it.head, bold: true, color: "accent" }));
+          ty += 54;
+        }
+        const lines = (it.body ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+        lines.push(...pointsToLines(it.points));
+        if (lines.length) B.push(tbox(x + 24, ty, w - 48, 586 - ty, size, { lines, color: "ink" }));
+      });
+      break;
+    }
+    case "stats": {
+      header();
+      const items = Array.isArray(sl.items) ? sl.items.slice(0, 4) : [];
+      const n = Math.max(1, items.length);
+      const w = Math.floor((1120 - 28 * (n - 1)) / n);
+      items.forEach((it, i) => {
+        const x = 80 + i * (w + 28);
+        B.push({ type: "card", x, y: 220, w, h: 320 });
+        if (it.value) {
+          const vs = autofit([{ em: emWidth(it.value), rel: 0, after: 0 }], w - 40, 120, 22, 60);
+          B.push(tbox(x + 20, 250, w - 40, 100, vs, { text: it.value, bold: true, align: "center", anchor: "middle", color: "accent" }));
+        }
+        if (it.label) B.push(tbox(x + 20, 360, w - 40, 36, 20, { text: it.label, bold: true, align: "center", color: "ink" }));
+        if (it.desc) {
+          const ds = autofit([{ em: emWidth(it.desc), rel: 0, after: 0 }], w - 40, 90, 10, 16);
+          B.push(tbox(x + 20, 402, w - 40, 100, ds, { text: it.desc, align: "center", color: "muted" }));
+        }
+      });
+      break;
+    }
+    case "timeline": {
+      header();
+      const steps = Array.isArray(sl.steps) ? sl.steps.slice(0, 5) : [];
+      const n = Math.max(1, steps.length);
+      const w = Math.floor((1120 - 24 * (n - 1)) / n);
+      if (n > 1)
+        B.push({ type: "rect", x: 80 + Math.floor(w / 2), y: 250, w: (n - 1) * (w + 24), h: 3, color: "line" });
+      const size = Math.min(
+        ...steps.map((st) => {
+          const fl: FitLine[] = [];
+          if (st.head) fl.push({ em: emWidth(st.head), rel: 3, after: 6 });
+          for (const l of (st.body ?? "").split("\n").filter((x) => x.trim()))
+            fl.push({ em: emWidth(l.trim()), rel: 0, after: 4 });
+          return autofit(fl, w, 320, 10, 20);
+        }),
+        20
+      );
+      steps.forEach((st, i) => {
+        const x = 80 + i * (w + 24);
+        const cx = x + Math.floor(w / 2);
+        B.push({ type: "circle", x: cx, y: 252, r: 22, fill: "accent", color: "accent" });
+        B.push(tbox(cx - 22, 230, 44, 44, 18, { text: String(i + 1), bold: true, align: "center", anchor: "middle", color: "bg1" }));
+        let ty = 296;
+        if (st.head) {
+          B.push(tbox(x, ty, w, 36, size + 3, { text: st.head, bold: true, align: "center", color: "ink" }));
+          ty += 42;
+        }
+        const lines = (st.body ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+        if (lines.length) B.push(tbox(x, ty, w, 616 - ty, size, { lines, align: "center", color: "muted" }));
+      });
+      break;
+    }
+    case "quote": {
+      B.push(tbox(100, 120, 200, 130, 96, { text: "“", bold: true, color: "accent" }));
+      const qs = autofit([{ em: emWidth(sl.text), rel: 0, after: 0 }], 960, 220, 18, 40);
+      B.push(tbox(160, 250, 960, 220, qs, { text: sl.text ?? "", italic: true, align: "center", anchor: "middle", color: "ink" }));
+      if (sl.by) B.push(tbox(160, 490, 960, 40, 18, { text: `—— ${sl.by}`, align: "center", color: "muted" }));
+      break;
+    }
+    case "image-text": {
+      header();
+      const right = String(sl.side ?? "").toLowerCase() === "right";
+      const [imgX, txtX] = right ? [656, 80] : [80, 656];
+      B.push({ type: "image", x: imgX, y: 168, w: 544, h: 470, image: sl.image, cover: true, rounded: true });
+      const fl: FitLine[] = [];
+      if (sl.head) fl.push({ em: emWidth(sl.head), rel: 2, after: 10 });
+      pointFitLines(sl.points, fl);
+      const size = autofit(fl, 544 - BULLET_INDENT, 446, 13, 30);
+      let ty = 196;
+      if (sl.head) {
+        B.push(tbox(txtX, ty, 544, 44, size + 2, { text: sl.head, bold: true, color: "accent" }));
+        ty += 56;
+      }
+      const lines = pointsToLines(sl.points);
+      if (lines.length) B.push(tbox(txtX, ty, 544, 626 - ty, size, { lines, color: "ink" }));
+      break;
+    }
+    default: {
+      // bullets(含未知版式)
+      header();
+      const fl: FitLine[] = [];
+      pointFitLines(sl.points, fl);
+      const size = autofit(fl, 1120 - BULLET_INDENT, 470, 16, 36);
+      const lines = pointsToLines(sl.points);
+      if (lines.length) B.push(tbox(80, 176, 1120, 470, size, { lines, anchor: "middle", color: "ink" }));
+    }
+  }
+  return B.length ? B : null;
 }
 
 // ───────── 自适应字号(与 pptx_native.rs 的 autofit 逐行同构)─────────
@@ -622,10 +1011,24 @@ function freeBoxHtml(b: FreeBox, pal: Palette, i: number): string {
   const sw = clamp(num(b.width, 3), 1, 40);
   const fill = b.fill && String(b.fill).length ? normColor(b.fill, pal, pal.accent) : null;
   const click = Math.max(0, num(b.click, 0));
-  // data-click:预览渲染全部盒子(动画终态),但把分步信息留给将来的放映/分步预览。
-  const dc = click > 0 ? ` data-click="${click}"` : "";
+  // data-click / data-anim*:预览渲染全部盒子(动画终态);放映模式读这些属性做分步播放。
+  // data-bi:盒子在 boxes 数组里的下标 —— 自由编辑覆盖层靠它把 DOM 元素对回 spec。
+  const an = b.anim && b.anim.effect
+    ? ` data-anim="${esc(b.anim.effect)}" data-animtrig="${esc(b.anim.trigger ?? "click")}"` +
+      ` data-animdur="${clamp(num(b.anim.dur, 500), 50, 10000)}"${b.anim.dir ? ` data-animdir="${esc(b.anim.dir)}"` : ""}`
+    : "";
+  const dc = `${click > 0 ? ` data-click="${click}"` : ""}${an} data-bi="${i}"`;
+  // rot/opacity:与引擎同语义 —— rot 只作用于 div 类盒子(绕自身中心),opacity 全类型;
+  // 图片盒的 opacity 引擎不支持(无 solidFill),预览端同样跳过,两端一致。
+  const rot = num(b.rot, 0) % 360;
+  const opacity = clamp(num(b.opacity, 100), 0, 100);
+  const isImg = ["image", "pic"].includes(String(b.type ?? ""));
+  const fx =
+    `${rot ? `transform:rotate(${rot}deg);` : ""}` +
+    `${opacity < 100 && !isImg ? `opacity:${opacity / 100};` : ""}`;
+  const svgFx = opacity < 100 ? `opacity:${opacity / 100};` : "";
   const box = (style: string, inner = "") =>
-    `<div class="ff-b" style="left:${px(x)};top:${py(y)};width:${px(w)};height:${py(h)};${style}"${dc}>${inner}</div>`;
+    `<div class="ff-b" style="left:${px(x)};top:${py(y)};width:${px(w)};height:${py(h)};${fx}${style}"${dc}>${inner}</div>`;
 
   switch (String(b.type ?? "")) {
     case "line": case "arrow": case "axis": {
@@ -637,7 +1040,7 @@ function freeBoxHtml(b: FreeBox, pal: Palette, i: number): string {
         : "";
       const dash = b.dash === true ? ` stroke-dasharray="${sw * 3},${sw * 2}"` : "";
       const mk = arrow ? ` marker-end="url(#${id})"` : "";
-      return `<div class="ff-b ff-full"${dc}>${svgLayer(
+      return `<div class="ff-b ff-full"${svgFx ? ` style="${svgFx}"` : ""}${dc}>${svgLayer(
         `<line x1="${x}" y1="${y}" x2="${x2}" y2="${y2}" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round"${dash}${mk}/>`,
         defs
       )}</div>`;
@@ -648,21 +1051,21 @@ function freeBoxHtml(b: FreeBox, pal: Palette, i: number): string {
       const closed = b.type === "polygon" || b.closed === true;
       const d = pts.map(([a, c]) => `${a},${c}`).join(" ");
       const tag = closed ? "polygon" : "polyline";
-      return `<div class="ff-b ff-full"${dc}>${svgLayer(
+      return `<div class="ff-b ff-full"${svgFx ? ` style="${svgFx}"` : ""}${dc}>${svgLayer(
         `<${tag} points="${d}" fill="${closed && fill ? fill : "none"}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"/>`
       )}</div>`;
     }
     case "ellipse": case "circle": {
       const r = num(b.r, 0);
       const [ex, ey, ew, eh] = r > 0 ? [x - r, y - r, 2 * r, 2 * r] : [x, y, w, h];
-      return `<div class="ff-b ff-full"${dc}>${svgLayer(
+      return `<div class="ff-b ff-full"${svgFx ? ` style="${svgFx}"` : ""}${dc}>${svgLayer(
         `<ellipse cx="${ex + ew / 2}" cy="${ey + eh / 2}" rx="${ew / 2}" ry="${eh / 2}" fill="${fill ?? "none"}" stroke="${stroke}" stroke-width="${sw}"/>`
       )}</div>`;
     }
     case "point": case "dot": {
       const r = Math.max(1, num(b.r, 6));
       const c = fill ?? stroke;
-      return `<div class="ff-b ff-full"${dc}>${svgLayer(
+      return `<div class="ff-b ff-full"${svgFx ? ` style="${svgFx}"` : ""}${dc}>${svgLayer(
         `<circle cx="${x}" cy="${y}" r="${r}" fill="${c}" stroke="${c}" stroke-width="1"/>`
       )}</div>`;
     }
@@ -685,8 +1088,12 @@ function freeBoxHtml(b: FreeBox, pal: Palette, i: number): string {
         .map((t, j) => `<p${multi ? de(`boxes.${i}.lines.${j}`) : de(`boxes.${i}.text`)}>${esc(t)}</p>`)
         .join("");
       if (!body) return "";
+      // serif 与引擎的 Georgia/宋体 对应;缺省继承页面黑体
+      const family = String(b.font ?? "").toLowerCase() === "serif"
+        ? "font-family:Georgia,'Times New Roman',SimSun,serif;"
+        : "";
       return box(
-        `${fs(size)};color:${color};text-align:${align};justify-content:${anchor};` +
+        `${fs(size)};color:${color};text-align:${align};justify-content:${anchor};${family}` +
           `${b.bold ? "font-weight:700;" : ""}${b.italic ? "font-style:italic;" : ""}`,
         body
       );
@@ -698,6 +1105,41 @@ function freeBoxHtml(b: FreeBox, pal: Palette, i: number): string {
     case "scrim": {
       const a = clamp(num(b.alpha, 50), 0, 100);
       return box(`background:${normColor(b.color, pal, "#000000")};opacity:${a / 100}`);
+    }
+    case "chart": {
+      const svg = chartSvg(b, pal);
+      if (!svg) return "";
+      return box("overflow:hidden", svg);
+    }
+    case "table": {
+      // 与引擎 table_xml 同构:表头 accent 底 + bg1 字,正文 card 底 + ink 字,网格线 line。
+      const rows = Array.isArray(b.rows) ? b.rows.filter((r) => Array.isArray(r)) : [];
+      const ncols = rows.reduce((m, r) => Math.max(m, r.length), 0);
+      if (!rows.length || !ncols) return "";
+      const header = b.header !== false;
+      const size = clamp(num(b.size, 14), 6, 40);
+      const ws = Array.isArray(b.widths) && b.widths.length === ncols && b.widths.every((v) => Number(v) > 0)
+        ? b.widths.map(Number)
+        : Array(ncols).fill(1);
+      const wsum = ws.reduce((a, c) => a + c, 0);
+      const cols = ws.map((v) => `<col style="width:${((v * 100) / wsum).toFixed(2)}%"/>`).join("");
+      const trs = rows
+        .map((r, ri) => {
+          const isHead = header && ri === 0;
+          const tds = Array.from({ length: ncols }, (_, c) => {
+            const cell = esc(r[c] ?? "");
+            const st = isHead
+              ? `background:${pal.accent};color:${pal.bg1};font-weight:700;text-align:center;${fs(size + 1)}`
+              : `background:${pal.card};color:${pal.ink};${fs(size)}`;
+            return `<td style="border:1px solid ${pal.cardLine};padding:.35em .6em;${st}"${de(`boxes.${i}.rows.${ri}.${c}`)}>${cell}</td>`;
+          }).join("");
+          return `<tr>${tds}</tr>`;
+        })
+        .join("");
+      return box(
+        "overflow:hidden",
+        `<table class="ff-tbl"><colgroup>${cols}</colgroup><tbody>${trs}</tbody></table>`
+      );
     }
     case "image": case "pic": {
       const s = String(b.image ?? "").trim();
@@ -723,6 +1165,119 @@ function freeBoxHtml(b: FreeBox, pal: Palette, i: number): string {
 function freeformHtml(sl: SlidePage, pal: Palette): string {
   const boxes = Array.isArray(sl.boxes) ? sl.boxes : [];
   return `<div class="ff">${boxes.map((b, i) => freeBoxHtml(b, pal, i)).join("")}</div>`;
+}
+
+// ───────── 形状化图表预览(与引擎 chart_shapes 逐数字对齐)─────────
+// 引擎把图表导出为原生形状组;这里出同构 SVG。几何常量(标题 26/类目 18/图例 20/内边距 6、
+// 柱宽 72%、留头 14px、饼自 270° 顺时针)两边完全一致 —— 改一边必须同步另一边。
+
+const CHART_EXTRA = ["#5B8DEF", "#E0A458", "#6CBF8F", "#B37FD4", "#D46A6A"];
+function chartColor(i: number, pal: Palette): string {
+  return i === 0 ? pal.accent : CHART_EXTRA[(i - 1) % CHART_EXTRA.length];
+}
+const PT = (pt: number) => (pt * 96) / 72; // svg 局部单位 = 画布 px
+
+function chartSvg(b: FreeBox, pal: Palette): string {
+  const kind = String(b.chartType ?? "");
+  const labels = Array.isArray(b.labels) ? b.labels.map(String) : [];
+  let series: number[][] = [];
+  if (Array.isArray(b.series)) {
+    series = (b.series as unknown[]).every((v) => typeof v === "number")
+      ? [(b.series as number[]).map((v) => Math.max(0, Number(v) || 0))]
+      : (b.series as number[][]).filter(Array.isArray).map((r) => r.map((v) => Math.max(0, Number(v) || 0)));
+  }
+  if (!labels.length || !series.length || series.every((s) => !s.length)) return "";
+  const names = Array.isArray(b.names) ? b.names.map(String) : [];
+  const w = Math.max(1, num(b.w, 100)), h = Math.max(1, num(b.h, 100));
+  const title = String(b.title ?? "");
+  const ns = series.length, nl = labels.length;
+  const titleH = title ? 26 : 0;
+  const isPie = kind === "pie" || kind === "donut";
+  const xlabH = isPie ? 0 : 18;
+  const legendH = isPie || (ns > 1 && names.length) ? 20 : 0;
+  const pad = 6;
+  const px0 = pad, py0 = titleH + pad;
+  const pw = Math.max(40, w - 2 * pad), ph = Math.max(40, h - titleH - xlabH - legendH - 2 * pad);
+  const baseline = py0 + ph;
+  const maxv = Math.max(1e-9, ...series.flat());
+  const out: string[] = [];
+  const txt = (x: number, y: number, t: string, pt: number, color: string, anchor = "middle", bold = false) =>
+    out.push(
+      `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${PT(pt).toFixed(1)}" fill="${color}" text-anchor="${anchor}"${bold ? ' font-weight="700"' : ""}>${esc(t)}</text>`
+    );
+  const fmtV = (v: number) => (Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : v.toFixed(1));
+  if (title) txt(w / 2, 18, title, 14, pal.ink, "middle", true);
+  if (kind === "bar") {
+    out.push(`<rect x="${px0}" y="${baseline}" width="${pw}" height="2" fill="${pal.cardLine}"/>`);
+    const groupW = pw / nl;
+    const inner = groupW * 0.72;
+    const barW = Math.max(4, inner / ns);
+    series.forEach((sv, si) => {
+      const color = chartColor(si, pal);
+      sv.slice(0, nl).forEach((v, li) => {
+        const bh = Math.round((v / maxv) * (ph - 14));
+        const bx = px0 + li * groupW + (groupW - inner) / 2 + si * barW;
+        if (bh > 0) out.push(`<rect x="${bx.toFixed(1)}" y="${baseline - bh}" width="${(barW - 2).toFixed(1)}" height="${bh}" fill="${color}"/>`);
+        if (ns === 1) txt(bx + barW / 2, baseline - bh - 5, fmtV(v), 10, pal.muted);
+      });
+    });
+    labels.forEach((lab, li) => txt(px0 + li * groupW + groupW / 2, baseline + 15, lab, 10, pal.muted));
+  } else if (kind === "line") {
+    out.push(`<rect x="${px0}" y="${baseline}" width="${pw}" height="2" fill="${pal.cardLine}"/>`);
+    const groupW = pw / nl;
+    series.forEach((sv, si) => {
+      const color = chartColor(si, pal);
+      const pts = sv.slice(0, nl).map((v, li) => [px0 + li * groupW + groupW / 2, baseline - Math.round((v / maxv) * (ph - 14))]);
+      if (pts.length >= 2)
+        out.push(`<polyline points="${pts.map((p) => p.join(",")).join(" ")}" fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round"/>`);
+      for (const [cx, cy] of pts) out.push(`<circle cx="${cx.toFixed(1)}" cy="${cy}" r="4" fill="${color}"/>`);
+    });
+    labels.forEach((lab, li) => txt(px0 + li * groupW + groupW / 2, baseline + 15, lab, 10, pal.muted));
+  } else if (isPie) {
+    const sv = series[0];
+    const total = sv.slice(0, nl).reduce((a, c) => a + c, 0);
+    if (total <= 0) return "";
+    const d = Math.min(pw, ph);
+    const R = d / 2;
+    const cx = w / 2, cy = py0 + ph / 2;
+    const innerR = kind === "donut" ? R * 0.62 : 0; // ≈ 引擎 blockArc adj3=19000 的孔径
+    let ang = 270;
+    sv.slice(0, nl).forEach((v, li) => {
+      const sweep = (v / total) * 360;
+      if (sweep <= 0) return;
+      out.push(sectorPath(cx, cy, R, innerR, ang, ang + Math.min(sweep, 359.98), chartColor(li, pal), pal.bg1));
+      ang += sweep;
+    });
+  } else return "";
+  if (legendH > 0) {
+    const ly = h - legendH + 2;
+    const entries: [string, string][] = isPie
+      ? labels.slice(0, nl).map((lab, li) => {
+          const sv = series[0];
+          const total = Math.max(1e-9, sv.slice(0, nl).reduce((a, c) => a + c, 0));
+          const v = sv[li] ?? 0;
+          return [chartColor(li, pal), `${lab} ${fmtV(v)}(${Math.round((v / total) * 100)}%)`];
+        })
+      : names.slice(0, ns).map((n, si) => [chartColor(si, pal), n]);
+    const cell = pw / Math.max(1, entries.length);
+    entries.forEach(([color, text], ei) => {
+      const ex = px0 + ei * cell;
+      out.push(`<rect x="${(ex + cell / 2 - 46).toFixed(1)}" y="${ly + 4}" width="10" height="10" fill="${color}"/>`);
+      txt(ex + cell / 2 - 32, ly + 13, text, 10, pal.muted, "start");
+    });
+  }
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" preserveAspectRatio="none" style="display:block">${out.join("")}</svg>`;
+}
+
+/** 扇形/环形切片路径(角度制,自 3 点钟顺时针,与 OOXML pie/blockArc 同约定)。 */
+function sectorPath(cx: number, cy: number, R: number, r: number, a1: number, a2: number, fill: string, stroke: string): string {
+  const rad = (a: number) => (a * Math.PI) / 180;
+  const p = (radius: number, a: number) => `${(cx + radius * Math.cos(rad(a))).toFixed(2)},${(cy + radius * Math.sin(rad(a))).toFixed(2)}`;
+  const large = a2 - a1 > 180 ? 1 : 0;
+  const d = r > 0
+    ? `M${p(r, a1)} L${p(R, a1)} A${R},${R} 0 ${large} 1 ${p(R, a2)} L${p(r, a2)} A${r},${r} 0 ${large} 0 ${p(r, a1)} Z`
+    : `M${cx.toFixed(2)},${cy.toFixed(2)} L${p(R, a1)} A${R},${R} 0 ${large} 1 ${p(R, a2)} Z`;
+  return `<path d="${d}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
 }
 
 /** spec 对象或 JSON 字符串 → 校验过的 SlideSpec(失败 null)。 */
@@ -826,7 +1381,10 @@ function slideBaseCss(pal: Palette): string {
   /* 线/折线/圆/点走 SVG:viewBox 与画布同为 1280×720,preserveAspectRatio="none" 下
      容器也是 16:9 → 不会变形,且 stroke-width 的用户单位 = 画布 px,与引擎线宽同尺度。 */
   .ff-full{left:0;top:0;width:100%;height:100%;pointer-events:none}
-  .ff-svg{width:100%;height:100%;overflow:visible;display:block}`;
+  .ff-svg{width:100%;height:100%;overflow:visible;display:block}
+  /* freeform 真表格:等分/按 widths 布局,行高均摊铺满盒子(与引擎 a:tr h 均摊一致) */
+  .ff-tbl{width:100%;height:100%;border-collapse:collapse;table-layout:fixed}
+  .ff-tbl td{overflow:hidden;text-overflow:ellipsis;vertical-align:middle}`;
 }
 
 /** spec(对象或 JSON 字符串)→ 自包含纵览 HTML(全部页竖排滚动)。解析失败返回 null。 */

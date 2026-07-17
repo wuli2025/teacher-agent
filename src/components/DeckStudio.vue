@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { usePolling } from "../composables/usePolling";
 import {
   Presentation,
@@ -8,14 +8,22 @@ import {
   Sparkles,
   Upload,
   X,
-  Eye,
   FolderOpen,
   ExternalLink,
   Monitor,
   FileType2,
   Zap,
-  Wand2,
   RefreshCw,
+  Play,
+  Send,
+  SlidersHorizontal,
+  ChevronsLeft,
+  ChevronsRight,
+  Wrench,
+  Shapes,
+  Image as ImageIcon,
+  Table2,
+  BarChart3,
 } from "@lucide/vue";
 import { useAppStore } from "../stores/app";
 import { useChatStore } from "../stores/chat";
@@ -23,8 +31,8 @@ import { artifacts as artifactsApi, chat as chatApi, skills as skillsApi, type A
 import { useFileDrop } from "../composables/useFileDrop";
 import { groupedThemes, findTheme, type DeckTheme } from "../lib/deckThemes";
 import {
-  parseSpecLoose, setSpecText, applySlideOp, NATIVE_THEME_META,
-  type SlideSpec, type SlideOp,
+  parseSpecLoose, setSpecText, applySlideOp, NATIVE_THEME_META, TRANSITIONS, BOX_ANIMS,
+  type SlideSpec, type SlideOp, type FreeBox,
 } from "../lib/slidesSpec";
 import { useSpecEdit } from "../composables/useSpecEdit";
 import { resolveSpecImages } from "../lib/specImages";
@@ -522,6 +530,296 @@ function openFile(path: string) {
   artifactsApi.openExternal(path);
 }
 const pptxOut = computed(() => outputs.value.find((o) => /\.pptx$/i.test(o.name)));
+
+// ───────── 豆包式工作区(生成开始后的双栏形态) ─────────
+// 左=真对话流(chat store 的消息/工具调用实时滚动,底部输入=继续修改),右=完整编辑器。
+// 配置首屏(showConfig)保持原样,点「生成」即切换,reset() 回配置。
+const showConfig = computed(() => phase.value === "config" && !hasResult.value);
+const bubbles = computed(() => chat.bubblesFor(convId.value));
+const chatCollapsed = ref(false);
+// 窗口收窄到 1200px 以下:对话流自动折叠成细条(规划 M1 验收项),拉宽自动展开。
+// 只在跨越阈值时改状态,不覆盖用户在宽窗口下的手动折叠。
+const narrowMq = window.matchMedia("(max-width: 1199px)");
+function onNarrowChange(e: MediaQueryListEvent | MediaQueryList) {
+  chatCollapsed.value = e.matches;
+}
+onMounted(() => {
+  if (narrowMq.matches) chatCollapsed.value = true;
+  narrowMq.addEventListener("change", onNarrowChange);
+});
+onBeforeUnmount(() => narrowMq.removeEventListener("change", onNarrowChange));
+const chatScrollEl = ref<HTMLElement | null>(null);
+// 新气泡/流式增量都贴底跟随(用户手动上翻超过一屏就不抢)
+watch(
+  [() => bubbles.value.length, () => bubbles.value[bubbles.value.length - 1]?.text?.length ?? 0],
+  async () => {
+    await nextTick();
+    const el = chatScrollEl.value;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < el.clientHeight;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }
+);
+const viewerRef = ref<InstanceType<typeof DeckViewer> | null>(null);
+const panelOpen = ref(true);
+const deckTitle = computed(
+  () => pptxOut.value?.name ?? specOut.value?.name ?? outputs.value[0]?.name ?? "演示文稿"
+);
+const LAYOUT_NAMES: Record<string, string> = {
+  title: "封面", section: "章节", bullets: "要点", "two-col": "两栏", compare: "对比",
+  stats: "数据", timeline: "时间线", quote: "引用", closing: "结尾",
+  "image-full": "全幅图", "image-text": "图文", freeform: "自由版式",
+};
+const curLayoutName = computed(() => {
+  const i = viewerRef.value?.page ?? 0;
+  const l = String(previewSpec.value?.slides?.[i]?.layout ?? "bullets");
+  return LAYOUT_NAMES[l] ?? l;
+});
+function fmtClock(unixSec: number): string {
+  if (!unixSec) return "";
+  const d = new Date(unixSec * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// ───────── 自由编辑:插入元素 + 选中元素属性(格式面板) ─────────
+const freeEditing = computed(() => !!viewerRef.value?.freeEdit && !!viewerRef.value?.curIsFreeform);
+const selIdx = computed<number | null>(() => (viewerRef.value?.selBoxIdx as number | null) ?? null);
+const selBox = computed<FreeBox | null>(() => {
+  const i = selIdx.value;
+  if (i === null) return null;
+  const boxes = (previewSpec.value as any)?.slides?.[viewerRef.value?.page ?? 0]?.boxes;
+  return Array.isArray(boxes) ? boxes[i] ?? null : null;
+});
+const BOX_NAMES: Record<string, string> = {
+  text: "文本", rect: "矩形", bar: "矩形", card: "卡片", scrim: "蒙版", image: "图片", pic: "图片",
+  line: "直线", arrow: "箭头", axis: "坐标轴", polyline: "折线", curve: "曲线", polygon: "多边形",
+  ellipse: "椭圆", circle: "圆形", point: "标记点", dot: "标记点",
+};
+const selBoxName = computed(() => BOX_NAMES[String(selBox.value?.type ?? "")] ?? String(selBox.value?.type ?? ""));
+const selIsText = computed(() => String(selBox.value?.type ?? "") === "text");
+const selIsImage = computed(() => ["image", "pic"].includes(String(selBox.value?.type ?? "")));
+const selIsLine = computed(() =>
+  ["line", "arrow", "axis", "polyline", "curve", "polygon"].includes(String(selBox.value?.type ?? ""))
+);
+const selRotatable = computed(() => ["text", "rect", "bar", "card", "scrim", "image", "pic"].includes(String(selBox.value?.type ?? "")));
+function patchSel(patch: Partial<FreeBox>) {
+  const i = selIdx.value;
+  if (i === null) return;
+  onDeckOp({ kind: "box-set", index: viewerRef.value?.page ?? 0, box: i, patch });
+}
+function numPatch(key: keyof FreeBox, e: Event) {
+  const v = Number((e.target as HTMLInputElement).value);
+  if (Number.isFinite(v)) patchSel({ [key]: Math.round(v) } as Partial<FreeBox>);
+}
+/** 色板词下拉(ink/muted/accent/白/黑)+ 自定义 hex。存进 spec 的是词或 #hex,换肤仍生效。 */
+const COLOR_WORDS = [
+  { id: "ink", name: "正文色" }, { id: "muted", name: "次要色" }, { id: "accent", name: "强调色" },
+  { id: "card", name: "卡片色" }, { id: "white", name: "白" }, { id: "black", name: "黑" },
+];
+function colorPatch(key: "color" | "fill", e: Event) {
+  const v = (e.target as HTMLSelectElement).value;
+  if (v === "__custom") return; // 等 hex 输入框落值
+  patchSel({ [key]: v || undefined } as Partial<FreeBox>);
+}
+function hexPatch(key: "color" | "fill", e: Event) {
+  const v = (e.target as HTMLInputElement).value.trim();
+  if (/^#?[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(v)) patchSel({ [key]: v.startsWith("#") ? v : `#${v}` } as Partial<FreeBox>);
+}
+
+// 插入元素(落画布中央,插完在覆盖层里直接拖)
+const shapeMenu = ref(false);
+function insertBox(box: FreeBox) {
+  shapeMenu.value = false;
+  viewerRef.value?.addBox(box);
+}
+function insertText() {
+  insertBox({ type: "text", x: 490, y: 320, w: 300, h: 80, text: "双击编辑文字", size: 20, color: "ink" });
+}
+const SHAPES: { name: string; make: () => FreeBox }[] = [
+  { name: "矩形", make: () => ({ type: "rect", x: 540, y: 310, w: 200, h: 100, color: "accent" }) },
+  { name: "卡片", make: () => ({ type: "card", x: 490, y: 280, w: 300, h: 160 }) },
+  { name: "圆形", make: () => ({ type: "circle", x: 640, y: 360, r: 60, color: "accent", width: 3 }) },
+  { name: "直线", make: () => ({ type: "line", x: 490, y: 360, x2: 790, y2: 360, color: "ink", width: 3 }) },
+  { name: "箭头", make: () => ({ type: "arrow", x: 490, y: 360, x2: 790, y2: 360, color: "ink", width: 3 }) },
+];
+async function insertImage() {
+  try {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const sel = await open({ multiple: false, filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }] });
+    if (!sel || Array.isArray(sel)) return;
+    insertBox({ type: "image", x: 440, y: 210, w: 400, h: 300, image: sel, cover: true });
+  } catch (e: any) {
+    error.value = e?.message ?? String(e);
+  }
+}
+// 表格:豆包式 7×6 格子选择器。首行默认表头,插完双击任意格直接改字。
+const tableMenu = ref(false);
+const tableHover = ref<[number, number]>([0, 0]); // [rows, cols]
+function insertTable(rows: number, cols: number) {
+  tableMenu.value = false;
+  const body = Array.from({ length: rows - 1 }, () => Array(cols).fill("内容"));
+  const head = Array.from({ length: cols }, (_, c) => `列 ${c + 1}`);
+  const h = Math.min(460, 48 * rows);
+  insertBox({ type: "table", x: 240, y: 190, w: 800, h, rows: [head, ...body], header: true, size: 14 });
+}
+// 图表:四种类型插入 + 豆包式底部数据编辑弹层(改完实时重绘,导出为形状组)
+const chartMenu = ref(false);
+const CHART_TYPES = [
+  { id: "bar", name: "柱状图" }, { id: "line", name: "折线图" },
+  { id: "pie", name: "饼图" }, { id: "donut", name: "环形图" },
+];
+function insertChart(kind: string) {
+  chartMenu.value = false;
+  insertBox({
+    type: "chart", chartType: kind, x: 340, y: 160, w: 600, h: 400,
+    labels: ["项目一", "项目二", "项目三", "项目四"], series: [[40, 65, 50, 80]],
+  });
+}
+const selIsChart = computed(() => String(selBox.value?.type ?? "") === "chart");
+/** 数据编辑草稿(打开时深拷贝,点「应用」才 patch —— 一次编辑 = 一步撤销)。 */
+const chartDraft = ref<{ labels: string[]; series: number[][]; names: string[] } | null>(null);
+function openChartEditor() {
+  const b = selBox.value;
+  if (!b) return;
+  const labels = Array.isArray(b.labels) ? b.labels.map(String) : [];
+  const raw = Array.isArray(b.series) ? b.series : [];
+  const series: number[][] = (raw as unknown[]).every((v) => typeof v === "number")
+    ? [(raw as number[]).slice()]
+    : (raw as number[][]).map((r) => (Array.isArray(r) ? r.slice() : []));
+  const names = Array.isArray(b.names) ? b.names.map(String) : [];
+  while (names.length < series.length) names.push("");
+  chartDraft.value = JSON.parse(JSON.stringify({ labels, series, names }));
+}
+function chartDraftCell(si: number, li: number, e: Event) {
+  const v = Number((e.target as HTMLInputElement).value);
+  if (chartDraft.value && Number.isFinite(v)) chartDraft.value.series[si][li] = v;
+}
+function chartAddLabel() {
+  const d = chartDraft.value;
+  if (!d) return;
+  d.labels.push(`项目${d.labels.length + 1}`);
+  d.series.forEach((s) => s.push(0));
+}
+function chartDelLabel(li: number) {
+  const d = chartDraft.value;
+  if (!d || d.labels.length <= 1) return;
+  d.labels.splice(li, 1);
+  d.series.forEach((s) => s.splice(li, 1));
+}
+function chartAddSeries() {
+  const d = chartDraft.value;
+  if (!d || d.series.length >= 6) return;
+  d.series.push(Array(d.labels.length).fill(0));
+  d.names.push(`系列${d.series.length}`);
+}
+function chartDelSeries() {
+  const d = chartDraft.value;
+  if (!d || d.series.length <= 1) return;
+  d.series.pop();
+  d.names.pop();
+}
+function applyChartEdit() {
+  const d = chartDraft.value;
+  if (!d) return;
+  patchSel({
+    labels: d.labels,
+    series: d.series.length === 1 ? d.series[0] : d.series,
+    names: d.names.some((n) => n.trim()) ? d.names : undefined,
+  });
+  chartDraft.value = null;
+}
+// 元素动画(选中盒子的 anim 字段;引擎写真 p:timing,放映 CSS 同构)
+const ANIM_GROUPS = [
+  { cls: "entr", name: "进入" },
+  { cls: "emph", name: "强调" },
+  { cls: "exit", name: "退出" },
+] as const;
+const selAnim = computed(() => selBox.value?.anim ?? null);
+function setAnim(effect: string) {
+  if (!effect) {
+    patchSel({ anim: undefined });
+    return;
+  }
+  const cur = selAnim.value;
+  patchSel({ anim: { effect, trigger: cur?.trigger, dur: cur?.dur, delay: cur?.delay, dir: cur?.dir } });
+}
+function animField(patch: Partial<NonNullable<FreeBox["anim"]>>) {
+  const cur = selAnim.value;
+  if (!cur) return;
+  patchSel({ anim: { ...cur, ...patch } });
+}
+const ANIM_TRIGGERS = [
+  { id: "click", name: "单击时" }, { id: "with", name: "与上个同时" }, { id: "after", name: "上个之后" },
+];
+/** 本页动画顺序列表(与放映的步骤模型同源:click 组升序在前,anim 盒按序在后)。 */
+const animSeq = computed(() => {
+  const sl = (previewSpec.value as any)?.slides?.[viewerRef.value?.page ?? 0];
+  const boxes: FreeBox[] = Array.isArray(sl?.boxes) ? sl.boxes : [];
+  const rows: { step: number; box: number; label: string }[] = [];
+  let step = 0;
+  const clicks = [...new Set(boxes.map((b) => Number(b.click) || 0))].filter((n) => n > 0).sort((a, b) => a - b);
+  for (const n of clicks) {
+    step++;
+    boxes.forEach((b, i) => {
+      if ((Number(b.click) || 0) === n && !b.anim?.effect)
+        rows.push({ step, box: i, label: `${BOX_NAMES[String(b.type ?? "")] ?? b.type} · 淡化` });
+    });
+  }
+  boxes.forEach((b, i) => {
+    if (!b.anim?.effect) return;
+    const trig = b.anim.trigger ?? "click";
+    if (trig === "click" || step === 0) step++;
+    const fx = BOX_ANIMS.find((a) => a.id === b.anim!.effect)?.name ?? b.anim.effect;
+    rows.push({ step, box: i, label: `${BOX_NAMES[String(b.type ?? "")] ?? b.type} · ${fx}${trig !== "click" ? (trig === "with" ? "（同时）" : "（之后）") : ""}` });
+  });
+  return rows;
+});
+
+// 页面切换动画(引擎 <p:transition> + 放映 CSS 同构)
+const curTransition = computed(
+  () => (previewSpec.value as any)?.slides?.[viewerRef.value?.page ?? 0]?.transition ?? null
+);
+function setTransition(patch: { type?: string; dir?: string; speed?: string }) {
+  const pg = viewerRef.value?.page ?? 0;
+  const cur = curTransition.value;
+  const type = patch.type !== undefined ? patch.type : (cur?.type ?? "");
+  if (!type) {
+    onDeckOp({ kind: "transition", index: pg, value: null });
+    return;
+  }
+  onDeckOp({
+    kind: "transition",
+    index: pg,
+    value: { type, dir: patch.dir ?? cur?.dir, speed: patch.speed ?? cur?.speed },
+  });
+}
+function transitionAll() {
+  const cur = curTransition.value;
+  onDeckOp({ kind: "transition", index: viewerRef.value?.page ?? 0, value: cur ? { ...cur } : null, all: true });
+}
+const TR_DIRS = [
+  { id: "up", name: "从底部" }, { id: "down", name: "从顶部" },
+  { id: "left", name: "从右侧" }, { id: "right", name: "从左侧" },
+];
+const TR_SPEEDS = [
+  { id: "fast", name: "快" }, { id: "med", name: "中" }, { id: "slow", name: "慢" },
+];
+
+// 选中表格的行列增删(面板按钮;深拷贝改完整体 patch,一次改动 = 一步撤销)
+const selIsTable = computed(() => String(selBox.value?.type ?? "") === "table");
+function tableMod(fn: (rows: string[][]) => void) {
+  const rows = selBox.value?.rows;
+  if (!Array.isArray(rows)) return;
+  const copy: string[][] = JSON.parse(JSON.stringify(rows));
+  fn(copy);
+  if (copy.length && copy[0].length) patchSel({ rows: copy });
+}
+const tableAddRow = () => tableMod((r) => r.push(Array(r[0]?.length ?? 1).fill("")));
+const tableDelRow = () => tableMod((r) => { if (r.length > 1) r.pop(); });
+const tableAddCol = () => tableMod((r) => r.forEach((row) => row.push("")));
+const tableDelCol = () => tableMod((r) => { if ((r[0]?.length ?? 0) > 1) r.forEach((row) => row.pop()); });
+
 function fillDemo() {
   contentText.value =
     "主题：Polaris 是什么。一句话——把 AI 变成你的创作生产线。" +
@@ -532,7 +830,8 @@ function fillDemo() {
 
 <template>
   <div class="dk">
-    <!-- 顶栏 -->
+    <!-- ═══════ 配置首屏(生成前) ═══════ -->
+    <template v-if="showConfig">
     <header class="dk-head">
       <Presentation :size="19" :stroke-width="1.7" class="dk-icon" />
       <h1 class="dk-title">PPT 演示</h1>
@@ -641,25 +940,12 @@ function fillDemo() {
           </span>
         </div>
 
-        <div v-if="hasResult" class="dk-side-sec">
-          <div class="dk-side-title">产物</div>
-          <button v-for="o in outputs" :key="o.path" class="dk-out" @click="openFile(o.path)">
-            <component :is="/\.pptx$/i.test(o.name) ? FileType2 : Monitor" :size="13" />
-            <span>{{ o.name }}</span><ExternalLink :size="11" />
-          </button>
-          <div class="dk-side-acts">
-            <button class="dk-ghost" @click="openDir"><FolderOpen :size="12" /> 目录</button>
-            <button class="dk-ghost" @click="openConv"><Eye :size="12" /> 对话</button>
-            <button class="dk-ghost" @click="reset"><RefreshCw :size="12" /> 重来</button>
-          </div>
-        </div>
       </aside>
 
-      <!-- 右：主区（输入 / 预览）+ 底部 composer -->
+      <!-- 右：内容输入 + 生成按钮 -->
       <main class="dk-main">
         <div class="dk-canvas" :class="{ drop: dropOver }">
-          <!-- 无产物：内容输入 -->
-          <div v-if="!hasResult && phase !== 'generating'" class="dk-input">
+          <div class="dk-input">
             <h3 class="dk-input-title"><FileText :size="16" :stroke-width="1.7" /> 演示内容</h3>
             <textarea
               v-model="contentText"
@@ -684,52 +970,194 @@ function fillDemo() {
               </div>
             </div>
           </div>
+        </div>
+        <div class="dk-composer">
+          <div v-if="error" class="dk-error">{{ error }}</div>
+          <button class="dk-primary" :disabled="!canGenerate || phase === 'generating'" @click="start">
+            <Zap :size="16" :stroke-width="1.9" /> 一键生成{{ isPpt ? "传统 PPT" : "网页 PPT" }}
+          </button>
+          <span class="dk-note">在「演示工坊」项目下新建对话注入技能全自动制作。</span>
+        </div>
+      </main>
+    </div>
+    </template>
 
-          <!-- 生成中、第一页还没落地：轻量等待面板（不再全屏遮罩） -->
-          <div v-else-if="phase === 'generating' && !previewHtml && !previewSpec" class="dk-wait">
-            <Loader :size="30" class="spin" />
-            <span class="dk-wait-t">{{ lastAction === 'revise' ? '正在按修改重做…' : '正在构思大纲与页面…' }}</span>
-            <span v-if="lastToolHint" class="dk-tool-hint">{{ lastToolHint }}</span>
-            <button class="dk-ghost" @click="openConv">在对话里看进度 →</button>
+    <!-- ═══════ 豆包式工作区(生成开始后):左对话流 + 右完整编辑器 ═══════ -->
+    <div v-else class="dk-ws">
+      <!-- 左:真对话流。AI 的分析/工具调用/完成卡片实时滚动,底部输入=继续修改 -->
+      <aside class="dk-chat" :class="{ folded: chatCollapsed }">
+        <div class="dk-chat-head">
+          <template v-if="!chatCollapsed">
+            <span class="dk-chat-title">对话</span>
+            <button class="dk-chat-ic" title="在完整对话页打开" @click="openConv"><ExternalLink :size="13" /></button>
+          </template>
+          <button class="dk-chat-ic" :title="chatCollapsed ? '展开对话' : '收起对话'" @click="chatCollapsed = !chatCollapsed">
+            <component :is="chatCollapsed ? ChevronsRight : ChevronsLeft" :size="14" />
+          </button>
+        </div>
+        <template v-if="!chatCollapsed">
+          <div ref="chatScrollEl" class="dk-chat-scroll">
+            <div
+              v-for="(b, i) in bubbles"
+              :key="i"
+              class="dk-bb"
+              :class="[b.role, { err: b.err }]"
+            >
+              <template v-if="b.role === 'tool'">
+                <Wrench :size="11" class="dk-bb-wr" />
+                <span class="dk-bb-tool">{{ b.tool }}</span>
+                <span v-if="b.toolDetail" class="dk-bb-detail">{{ b.toolDetail }}</span>
+              </template>
+              <template v-else>{{ b.text }}</template>
+            </div>
+            <div v-if="sending" class="dk-bb assistant dk-typing"><Loader :size="12" class="spin" /> 正在工作…</div>
+            <!-- 完成卡片:豆包式回执,点击打开成品 -->
+            <button v-if="phase === 'done' && pptxOut" class="dk-done-card" @click="openFile(pptxOut.path)">
+              <FileType2 :size="16" />
+              <span class="dk-done-name">{{ pptxOut.name }}</span>
+              <span class="dk-done-time">创建 {{ fmtClock(pptxOut.modified) }}</span>
+            </button>
           </div>
+          <div class="dk-chat-in">
+            <textarea
+              v-model="reviseText"
+              rows="2"
+              placeholder="发消息继续修改：第 2 页换三栏 / 换深空主题 / 再加一页总结…"
+              :disabled="phase === 'generating'"
+              @keydown.enter.exact.prevent="revise"
+            />
+            <button class="dk-send" :disabled="!reviseText.trim() || phase === 'generating'" title="发送 (Enter)" @click="revise">
+              <Send :size="15" />
+            </button>
+          </div>
+        </template>
+      </aside>
 
-          <!-- 有页可看：播放器。生成中就开始逐页点亮，完成后变成 导出/换肤 工具栏 -->
-          <div v-else class="dk-preview">
-            <div v-if="phase === 'generating'" class="dk-strip">
-              <Loader :size="13" class="spin" />
-              <b>{{ lastAction === 'revise' ? '正在按修改重做' : '正在生成' }} · 已出 {{ specPages }} 页</b>
-              <span v-if="lastToolHint" class="dk-tool-hint">{{ lastToolHint }}</span>
-              <button class="dk-ghost xs" @click="openConv">看进度</button>
-            </div>
-            <div v-else-if="isPpt && specOut" class="dk-toolbar">
-              <button class="dk-primary sm" :disabled="exporting" @click="exportPptx">
-                <Loader v-if="exporting" :size="14" class="spin" /><FileType2 v-else :size="14" />
-                {{ exporting ? "导出中…" : "导出 PPTX" }}
+      <!-- 右:完整编辑器(标题栏 / 插入工具条 / 舞台+格式面板) -->
+      <main class="dk-ed">
+        <div class="dk-ed-title">
+          <Presentation :size="17" :stroke-width="1.7" class="dk-icon" />
+          <span class="dk-ed-name" :title="deckTitle">{{ deckTitle }}</span>
+          <span v-if="phase === 'generating'" class="dk-ed-live">
+            <Loader :size="12" class="spin" />
+            {{ lastAction === 'revise' ? '正在按修改重做' : '正在生成' }}<template v-if="specPages"> · 已出 {{ specPages }} 页</template>
+          </span>
+          <span v-else-if="exported" class="dk-exported">已保存到 {{ exported }}</span>
+          <div class="dk-ed-acts">
+            <button class="dk-ghost" :disabled="!previewSpec" title="全屏放映 (F5)" @click="viewerRef?.present()">
+              <Play :size="13" /> 放映
+            </button>
+            <button v-if="isPpt && specOut" class="dk-primary sm" :disabled="exporting || phase === 'generating'" @click="exportPptx">
+              <Loader v-if="exporting" :size="13" class="spin" /><FileType2 v-else :size="13" />
+              {{ exporting ? "导出中…" : "导出 PPTX" }}
+            </button>
+            <button class="dk-ghost" title="打开产物目录" @click="openDir"><FolderOpen :size="13" /> 目录</button>
+            <button class="dk-ghost" title="放弃当前，回到配置重新开始" @click="reset"><RefreshCw :size="13" /></button>
+          </div>
+        </div>
+        <div v-if="isPpt && previewSpec" class="dk-ed-tools">
+          <!-- 插入:只在自由编辑态出现(语义页由 autofit 管排版,没有可插的自由元素) -->
+          <template v-if="freeEditing && phase === 'done'">
+            <button class="dk-tool" title="插入文本框" @click="insertText"><FileText :size="13" /> 文本</button>
+            <span class="dk-shape-wrap">
+              <button class="dk-tool" :class="{ on: shapeMenu }" title="插入图形" @click="shapeMenu = !shapeMenu">
+                <Shapes :size="13" /> 图形
               </button>
-              <!-- 导出回执:明说存成了哪个文件 —— 否则用户以为「没保存」(真踩过) -->
-              <span v-if="exported" class="dk-exported">已保存到 {{ exported }}</span>
-              <button class="dk-ghost" @click="openDir"><FolderOpen :size="12" /> 目录</button>
-              <div class="dk-skin">
-                <span class="dk-skin-lab">换肤</span>
-                <button
-                  v-for="t in NATIVE_THEME_META"
-                  :key="t.id"
-                  class="dk-skin-sw"
-                  :class="{ on: specTheme === t.id, busy: skinning === t.id }"
-                  :title="`${t.name}（内容不变，预览与导出同步换色）`"
-                  :disabled="!!skinning"
-                  :style="{ background: t.bg }"
-                  @click="applyTheme(t.id)"
-                >
-                  <span class="dk-skin-acc" :style="{ background: t.accent }"></span>
-                </button>
-                <Loader v-if="skinning" :size="12" class="spin" />
+              <div v-if="shapeMenu" class="dk-shape-menu">
+                <button v-for="s in SHAPES" :key="s.name" @click="insertBox(s.make())">{{ s.name }}</button>
               </div>
+            </span>
+            <button class="dk-tool" title="插入本地图片" @click="insertImage"><ImageIcon :size="13" /> 图片</button>
+            <span class="dk-shape-wrap">
+              <button class="dk-tool" :class="{ on: chartMenu }" title="插入图表（导出为可选中的形状组）" @click="chartMenu = !chartMenu">
+                <BarChart3 :size="13" /> 图表
+              </button>
+              <div v-if="chartMenu" class="dk-shape-menu">
+                <button v-for="c in CHART_TYPES" :key="c.id" @click="insertChart(c.id)">{{ c.name }}</button>
+              </div>
+            </span>
+            <span class="dk-shape-wrap">
+              <button class="dk-tool" :class="{ on: tableMenu }" title="插入表格（PowerPoint 里仍是真表格）" @click="tableMenu = !tableMenu">
+                <Table2 :size="13" /> 表格
+              </button>
+              <div v-if="tableMenu" class="dk-tbl-pick" @mouseleave="tableHover = [0, 0]">
+                <div class="dk-tbl-lab">插入表格 <b>{{ tableHover[0] || "-" }} × {{ tableHover[1] || "-" }}</b></div>
+                <div class="dk-tbl-grid">
+                  <button
+                    v-for="n in 42"
+                    :key="n"
+                    :class="{ lit: Math.ceil(n / 7) <= tableHover[0] && ((n - 1) % 7) + 1 <= tableHover[1] }"
+                    @mouseenter="tableHover = [Math.ceil(n / 7), ((n - 1) % 7) + 1]"
+                    @click="insertTable(Math.ceil(n / 7), ((n - 1) % 7) + 1)"
+                  />
+                </div>
+              </div>
+            </span>
+            <span class="dk-tools-sep" />
+          </template>
+          <button class="dk-tool" :class="{ on: panelOpen }" title="格式面板" @click="panelOpen = !panelOpen">
+            <SlidersHorizontal :size="13" /> 格式
+          </button>
+          <div class="dk-zoom">
+            <button title="缩小" @click="viewerRef?.setZoom((viewerRef?.zoom ?? 100) - 10)">−</button>
+            <span>{{ viewerRef?.zoom ?? 100 }}%</span>
+            <button title="放大" @click="viewerRef?.setZoom((viewerRef?.zoom ?? 100) + 10)">+</button>
+          </div>
+        </div>
+        <div v-if="error" class="dk-error ws">{{ error }}</div>
+        <!-- 图表数据编辑弹层(豆包式底部表格):草稿制,点「应用」才落盘 = 一步撤销 -->
+        <div v-if="chartDraft" class="dk-chart-sheet" @click.self="chartDraft = null">
+          <div class="dk-chart-card">
+            <div class="dk-chart-head">
+              编辑图表数据
+              <button class="dk-chat-ic" title="关闭" @click="chartDraft = null"><X :size="14" /></button>
             </div>
-            <!-- 传统PPT:组件播放器(缩略图+舞台+翻页,与导出同构;不走 iframe——
-                 Tauri CSP 会拦 srcdoc 内联脚本,组件方案由 Vue 管状态,天然免疫) -->
+            <div class="dk-chart-grid-wrap">
+              <table class="dk-chart-grid">
+                <thead>
+                  <tr>
+                    <th>类目</th>
+                    <th v-for="(n, si) in chartDraft.series" :key="si">
+                      <input v-model="chartDraft.names[si]" type="text" :placeholder="`系列${si + 1}`" />
+                    </th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(lab, li) in chartDraft.labels" :key="li">
+                    <td><input v-model="chartDraft.labels[li]" type="text" /></td>
+                    <td v-for="(sv, si) in chartDraft.series" :key="si">
+                      <input type="number" :value="sv[li] ?? 0" @change="chartDraftCell(si, li, $event)" />
+                    </td>
+                    <td>
+                      <button class="dk-chat-ic" title="删这一行" :disabled="chartDraft.labels.length <= 1" @click="chartDelLabel(li)"><X :size="12" /></button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="dk-chart-acts">
+              <button class="dk-ghost" @click="chartAddLabel">+ 行</button>
+              <button class="dk-ghost" :disabled="chartDraft.series.length >= 6" @click="chartAddSeries">+ 系列</button>
+              <button class="dk-ghost" :disabled="chartDraft.series.length <= 1" @click="chartDelSeries">− 系列</button>
+              <span style="flex:1"></span>
+              <button class="dk-ghost" @click="chartDraft = null">取消</button>
+              <button class="dk-primary sm" @click="applyChartEdit">应用</button>
+            </div>
+          </div>
+        </div>
+        <div class="dk-ed-body">
+          <div class="dk-ed-stage">
+            <!-- 生成中第一页还没落地:轻量等待(左栏对话流已在讲进度) -->
+            <div v-if="phase === 'generating' && !previewHtml && !previewSpec" class="dk-wait">
+              <Loader :size="30" class="spin" />
+              <span class="dk-wait-t">{{ lastAction === 'revise' ? '正在按修改重做…' : '正在构思大纲与页面…' }}</span>
+              <span v-if="lastToolHint" class="dk-tool-hint">{{ lastToolHint }}</span>
+            </div>
+            <!-- 传统PPT:组件播放器(与导出同构;不走 iframe——Tauri CSP 拦 srcdoc 内联脚本) -->
             <DeckViewer
-              v-if="isPpt && previewSpec"
+              v-else-if="isPpt && previewSpec"
+              ref="viewerRef"
               class="dk-viewer"
               :spec="previewSpec"
               :generating="phase === 'generating'"
@@ -739,43 +1167,210 @@ function fillDemo() {
               @op="onDeckOp"
               @undo="specEdit.undo()"
             />
-            <!-- 网页PPT:自包含 html 喂 iframe。安全: 只给 allow-scripts,绝不加
-                 allow-same-origin —— 二者并存会让 srcdoc 内 AI 生成的脚本自拆沙箱、
-                 同源访问 __TAURI_INTERNALS__ 调后端。 -->
+            <!-- 网页PPT:自包含 html 喂 iframe。安全: 只给 allow-scripts,绝不加 allow-same-origin -->
             <iframe v-else-if="previewHtml" class="dk-frame" :srcdoc="previewHtml" sandbox="allow-scripts"></iframe>
             <div v-else class="dk-frame-empty">
               <Monitor :size="30" />
-              <span>{{ phase === 'generating' ? '预览加载中…可在对话或目录查看' : '预览没有加载出来' }}</span>
+              <span>{{ phase === 'generating' ? '预览加载中…可在目录查看' : '预览没有加载出来' }}</span>
               <button v-if="phase !== 'generating'" class="dk-ghost" @click="loadOutputs">重新加载预览</button>
             </div>
-            <div v-if="isPpt && pptxOut && phase === 'done'" class="dk-preview-tip">
-              最终 <b>.pptx</b> 已生成（原生可编辑：可改字/换色/挪位置）——点「导出 PPTX」重转并定位文件。
-            </div>
           </div>
-        </div>
-
-        <!-- 底部 composer：未生成=生成；已生成=继续修改 -->
-        <div class="dk-composer">
-          <div v-if="error" class="dk-error">{{ error }}</div>
-          <template v-if="!hasResult">
-            <button class="dk-primary" :disabled="!canGenerate || phase === 'generating'" @click="start">
-              <Zap :size="16" :stroke-width="1.9" /> 一键生成{{ isPpt ? "传统 PPT" : "网页 PPT" }}
-            </button>
-            <span class="dk-note">在「演示工坊」项目下新建对话注入技能全自动制作。</span>
-          </template>
-          <template v-else>
-            <Wand2 :size="16" :stroke-width="1.7" class="dk-comp-i" />
-            <textarea
-              v-model="reviseText"
-              class="dk-comp-input"
-              rows="1"
-              placeholder="继续修改：第 2 页换三栏卡片 / 换东京夜主题 / 标题改成『…』 / 再加一页总结…"
-              @keydown.enter.exact.prevent="revise"
-            />
-            <button class="dk-primary sm" :disabled="!reviseText.trim() || phase === 'generating'" @click="revise">
-              <Wand2 :size="14" /> 应用修改
-            </button>
-          </template>
+          <!-- 右:格式面板(文档信息 + 选中元素属性 + 换肤 + 产物) -->
+          <aside v-if="panelOpen && isPpt && previewSpec" class="dk-panel">
+            <!-- 选中元素:属性直写 spec(每次改动 = 一步撤销,预览与导出同步) -->
+            <div v-if="selBox" class="dk-panel-sec">
+              <div class="dk-panel-title">元素 · {{ selBoxName }}</div>
+              <div class="dk-xywh" v-if="!selIsLine">
+                <label>X<input type="number" :value="selBox.x ?? 0" @change="numPatch('x', $event)" /></label>
+                <label>Y<input type="number" :value="selBox.y ?? 0" @change="numPatch('y', $event)" /></label>
+                <template v-if="selBox.r === undefined">
+                  <label>宽<input type="number" :value="selBox.w ?? 100" @change="numPatch('w', $event)" /></label>
+                  <label>高<input type="number" :value="selBox.h ?? 100" @change="numPatch('h', $event)" /></label>
+                </template>
+                <label v-else>半径<input type="number" :value="selBox.r" @change="numPatch('r', $event)" /></label>
+              </div>
+              <label v-if="selRotatable" class="dk-prop-row">
+                旋转
+                <input type="number" min="0" max="359" :value="selBox.rot ?? 0" @change="numPatch('rot', $event)" />
+              </label>
+              <label v-if="!selIsImage" class="dk-prop-row">
+                不透明
+                <input type="number" min="0" max="100" :value="selBox.opacity ?? 100" @change="numPatch('opacity', $event)" />
+              </label>
+              <template v-if="selIsText">
+                <label class="dk-prop-row">
+                  字号
+                  <input type="number" min="4" max="400" :value="selBox.size ?? 18" @change="numPatch('size', $event)" />
+                </label>
+                <div class="dk-seg">
+                  <button :class="{ on: !!selBox.bold }" title="加粗" @click="patchSel({ bold: !selBox.bold || undefined })"><b>B</b></button>
+                  <button :class="{ on: !!selBox.italic }" title="斜体" @click="patchSel({ italic: !selBox.italic || undefined })"><i>I</i></button>
+                </div>
+                <div class="dk-seg">
+                  <button v-for="a in [['left','左'],['center','中'],['right','右']]" :key="a[0]"
+                    :class="{ on: (selBox.align ?? 'left') === a[0] || (a[0]==='left' && !selBox.align) }"
+                    @click="patchSel({ align: a[0] === 'left' ? undefined : a[0] })">{{ a[1] }}</button>
+                </div>
+                <div class="dk-seg">
+                  <button :class="{ on: !selBox.font }" @click="patchSel({ font: undefined })">黑体</button>
+                  <button :class="{ on: selBox.font === 'serif' }" @click="patchSel({ font: 'serif' })">衬线</button>
+                </div>
+              </template>
+              <label v-if="selIsLine" class="dk-prop-row">
+                线宽
+                <input type="number" min="1" max="40" :value="selBox.width ?? 3" @change="numPatch('width', $event)" />
+              </label>
+              <template v-if="selIsChart">
+                <label class="dk-prop-row">
+                  类型
+                  <select :value="selBox.chartType" @change="patchSel({ chartType: ($event.target as HTMLSelectElement).value })">
+                    <option v-for="c in CHART_TYPES" :key="c.id" :value="c.id">{{ c.name }}</option>
+                  </select>
+                </label>
+                <label class="dk-prop-row">
+                  标题
+                  <input type="text" :value="selBox.title ?? ''" @change="patchSel({ title: ($event.target as HTMLInputElement).value || undefined })" />
+                </label>
+                <button class="dk-ghost" style="justify-content:center" @click="openChartEditor">编辑数据</button>
+                <span class="dk-note">导出为形状组（可选中改色，PowerPoint 里不能改数）。</span>
+              </template>
+              <template v-if="selIsTable">
+                <div class="dk-panel-row"><span>表格</span><b>{{ selBox.rows?.length ?? 0 }} 行 × {{ selBox.rows?.[0]?.length ?? 0 }} 列</b></div>
+                <div class="dk-seg">
+                  <button title="加一行" @click="tableAddRow">行 +</button>
+                  <button title="删末行" @click="tableDelRow">行 −</button>
+                  <button title="加一列" @click="tableAddCol">列 +</button>
+                  <button title="删末列" @click="tableDelCol">列 −</button>
+                </div>
+                <label class="dk-check"><input type="checkbox" :checked="selBox.header !== false" @change="patchSel({ header: ($event.target as HTMLInputElement).checked ? undefined : false })" /> 首行作表头</label>
+                <label class="dk-prop-row">
+                  字号
+                  <input type="number" min="6" max="40" :value="selBox.size ?? 14" @change="numPatch('size', $event)" />
+                </label>
+                <span class="dk-note">双击任意单元格直接改字。</span>
+              </template>
+              <label class="dk-prop-row">
+                颜色
+                <select :value="COLOR_WORDS.some(c => c.id === selBox!.color) ? selBox!.color : (selBox!.color ? '__custom' : 'ink')" @change="colorPatch('color', $event)">
+                  <option v-for="c in COLOR_WORDS" :key="c.id" :value="c.id">{{ c.name }}</option>
+                  <option value="__custom">自定义…</option>
+                </select>
+              </label>
+              <input
+                v-if="selBox.color && !COLOR_WORDS.some(c => c.id === selBox!.color)"
+                class="dk-hex" type="text" placeholder="#RRGGBB" :value="selBox.color" @change="hexPatch('color', $event)"
+              />
+            </div>
+            <!-- 元素动画:进入/强调/退出 + 触发/时长/方向(放映与导出 PowerPoint 均生效) -->
+            <div v-if="selBox" class="dk-panel-sec">
+              <div class="dk-panel-title">元素动画</div>
+              <button class="dk-tr-none" :class="{ on: !selAnim }" @click="setAnim('')">无动画</button>
+              <template v-for="g in ANIM_GROUPS" :key="g.cls">
+                <div class="dk-group-label">{{ g.name }}</div>
+                <div class="dk-tr-grid three">
+                  <button
+                    v-for="a in BOX_ANIMS.filter(a => a.cls === g.cls)"
+                    :key="a.id"
+                    :class="{ on: selAnim?.effect === a.id }"
+                    @click="setAnim(a.id)"
+                  >{{ a.name }}</button>
+                </div>
+              </template>
+              <template v-if="selAnim">
+                <label class="dk-prop-row">
+                  触发
+                  <select :value="selAnim.trigger ?? 'click'" @change="animField({ trigger: ($event.target as HTMLSelectElement).value })">
+                    <option v-for="t in ANIM_TRIGGERS" :key="t.id" :value="t.id">{{ t.name }}</option>
+                  </select>
+                </label>
+                <label class="dk-prop-row">
+                  时长 ms
+                  <input type="number" min="50" max="10000" step="50" :value="selAnim.dur ?? 500"
+                    @change="animField({ dur: Number(($event.target as HTMLInputElement).value) || 500 })" />
+                </label>
+                <div v-if="BOX_ANIMS.find(a => a.id === selAnim!.effect)?.hasDir" class="dk-seg">
+                  <button v-for="d in TR_DIRS" :key="d.id" :class="{ on: (selAnim.dir ?? 'up') === d.id }"
+                    @click="animField({ dir: d.id })">{{ d.name }}</button>
+                </div>
+              </template>
+              <!-- 顺序列表 + 预览(规划 M4 任务项):点行选中对应元素,预览在舞台原位播完自动复原 -->
+              <template v-if="animSeq.length">
+                <div class="dk-group-label">播放顺序</div>
+                <div class="dk-anim-seq">
+                  <button v-for="(r, ri) in animSeq" :key="ri" class="dk-anim-row" :class="{ on: selIdx === r.box }" @click="viewerRef?.selectBox(r.box)">
+                    <span class="dk-anim-step">{{ r.step }}</span>{{ r.label }}
+                  </button>
+                </div>
+                <button class="dk-ghost" style="justify-content:center" :disabled="viewerRef?.previewingAnims" @click="viewerRef?.previewAnims()">
+                  <Play :size="12" /> {{ viewerRef?.previewingAnims ? "播放中…" : "预览本页动画" }}
+                </button>
+              </template>
+              <span class="dk-note">放映时按序播放；导出后 PowerPoint 里是真动画。</span>
+            </div>
+            <div class="dk-panel-sec">
+              <div class="dk-panel-title">文档</div>
+              <div class="dk-panel-row"><span>页数</span><b>{{ specPages }}</b></div>
+              <div class="dk-panel-row"><span>当前页</span><b>第 {{ (viewerRef?.page ?? 0) + 1 }} 页 · {{ curLayoutName }}</b></div>
+            </div>
+            <!-- 页面切换:效果格 + 方向 + 速度 + 应用到全部(引擎 p:transition,PowerPoint 放映原生生效) -->
+            <div v-if="phase === 'done'" class="dk-panel-sec">
+              <div class="dk-panel-title">页面切换</div>
+              <div class="dk-tr-grid">
+                <button
+                  v-for="t in TRANSITIONS"
+                  :key="t.id"
+                  :class="{ on: (curTransition?.type ?? '') === t.id }"
+                  @click="setTransition({ type: t.id })"
+                >{{ t.name }}</button>
+              </div>
+              <template v-if="TRANSITIONS.find(t => t.id === (curTransition?.type ?? ''))?.hasDir">
+                <div class="dk-seg">
+                  <button
+                    v-for="d in TR_DIRS"
+                    :key="d.id"
+                    :class="{ on: (curTransition?.dir ?? 'up') === d.id }"
+                    @click="setTransition({ dir: d.id })"
+                  >{{ d.name }}</button>
+                </div>
+              </template>
+              <div v-if="curTransition" class="dk-seg">
+                <button
+                  v-for="sp in TR_SPEEDS"
+                  :key="sp.id"
+                  :class="{ on: (curTransition?.speed ?? 'med') === sp.id }"
+                  @click="setTransition({ speed: sp.id })"
+                >{{ sp.name }}</button>
+              </div>
+              <button class="dk-ghost" style="justify-content:center" @click="transitionAll">应用到全部页</button>
+              <span class="dk-note">放映与导出的 PowerPoint 均生效。</span>
+            </div>
+            <div class="dk-panel-sec">
+              <div class="dk-panel-title">主题换肤</div>
+              <div class="dk-skin wrap">
+                <button
+                  v-for="t in NATIVE_THEME_META"
+                  :key="t.id"
+                  class="dk-skin-sw"
+                  :class="{ on: specTheme === t.id, busy: skinning === t.id }"
+                  :title="`${t.name}（内容不变，预览与导出同步换色）`"
+                  :disabled="!!skinning || phase === 'generating'"
+                  :style="{ background: t.bg }"
+                  @click="applyTheme(t.id)"
+                >
+                  <span class="dk-skin-acc" :style="{ background: t.accent }"></span>
+                </button>
+                <Loader v-if="skinning" :size="12" class="spin" />
+              </div>
+              <span class="dk-note">内容不变，预览与导出同步换色。</span>
+            </div>
+            <div class="dk-panel-sec">
+              <div class="dk-panel-title">产物</div>
+              <button v-for="o in outputs" :key="o.path" class="dk-out" @click="openFile(o.path)">
+                <component :is="/\.pptx$/i.test(o.name) ? FileType2 : Monitor" :size="13" />
+                <span>{{ o.name }}</span><ExternalLink :size="11" />
+              </button>
+            </div>
+          </aside>
         </div>
       </main>
     </div>
@@ -858,29 +1453,124 @@ function fillDemo() {
 .dk-file-x { border: none; background: transparent; color: var(--muted); cursor: pointer; display: inline-flex; padding: 1px; }
 .dk-file-x:hover { color: var(--vermilion); }
 
-/* 预览态 */
-.dk-preview { flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+/* ═══════ 豆包式工作区 ═══════ */
+.dk-ws { flex: 1; display: flex; overflow: hidden; }
+
+/* 左:对话流 */
+.dk-chat { width: 316px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border-soft); background: var(--bg-soft); transition: width .18s ease; overflow: hidden; }
+.dk-chat.folded { width: 42px; }
+@media (max-width: 1200px) { .dk-chat:not(.folded) { width: 252px; } }
+.dk-chat-head { display: flex; align-items: center; gap: 4px; padding: 9px 10px; border-bottom: 1px solid var(--border-soft); }
+.dk-chat-title { flex: 1; font-size: 12.5px; font-weight: 700; color: var(--text-2); }
+.dk-chat-ic { display: inline-flex; padding: 4px; border: none; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.dk-chat-ic:hover { background: var(--bg); color: var(--primary); }
+.dk-chat.folded .dk-chat-head { flex-direction: column; padding: 9px 0; }
+.dk-chat-scroll { flex: 1; overflow-y: auto; padding: 12px 10px; display: flex; flex-direction: column; gap: 8px; }
+.dk-bb { max-width: 100%; font-size: 12.5px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+.dk-bb.user { align-self: flex-end; background: var(--primary); color: #fff; border-radius: 10px 10px 3px 10px; padding: 7px 11px; max-width: 92%; }
+.dk-bb.assistant { color: var(--text); }
+.dk-bb.assistant.err { color: var(--vermilion); }
+.dk-bb.tool { display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; font-size: 11px; color: var(--muted); background: var(--bg); border: 1px solid var(--border-soft); border-radius: 6px; padding: 4px 8px; }
+.dk-bb-wr { flex-shrink: 0; }
+.dk-bb-tool { font-weight: 600; flex-shrink: 0; }
+.dk-bb-detail { overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: 10.5px; }
+.dk-typing { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.dk-done-card { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--primary); border-radius: 10px; background: var(--primary-soft); color: var(--primary-deep); cursor: pointer; text-align: left; }
+.dk-done-card:hover { filter: brightness(1.03); }
+.dk-done-name { flex: 1; font-size: 12.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-done-time { font-size: 10.5px; color: var(--muted); flex-shrink: 0; }
+.dk-chat-in { display: flex; align-items: flex-end; gap: 6px; padding: 10px; border-top: 1px solid var(--border-soft); }
+.dk-chat-in textarea { flex: 1; min-width: 0; resize: none; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--text); font-size: 12.5px; line-height: 1.5; font-family: inherit; }
+.dk-chat-in textarea:focus { outline: none; border-color: var(--primary); }
+.dk-chat-in textarea:disabled { opacity: .55; }
+.dk-send { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: none; border-radius: 9px; background: var(--primary); color: #fff; cursor: pointer; flex-shrink: 0; }
+.dk-send:hover:not(:disabled) { filter: brightness(1.08); }
+.dk-send:disabled { opacity: .45; cursor: default; }
+
+/* 右:编辑器 */
+.dk-ed { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.dk-ed-title { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); background: var(--panel); }
+.dk-ed-name { font-size: 14px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-ed-live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--primary-deep); white-space: nowrap; }
+.dk-ed-acts { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.dk-ed-tools { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--border-soft); background: var(--panel); }
+.dk-tool { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text-2); font-size: 12px; font-weight: 600; cursor: pointer; }
+.dk-tool:hover { border-color: var(--primary); color: var(--primary); }
+.dk-tool.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-deep); }
+.dk-zoom { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.dk-zoom button { width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-2); font-size: 14px; line-height: 1; cursor: pointer; }
+.dk-zoom button:hover { border-color: var(--primary); color: var(--primary); }
+.dk-zoom span { min-width: 44px; text-align: center; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dk-tools-sep { width: 1px; height: 18px; background: var(--border-soft); margin: 0 4px; }
+.dk-shape-wrap { position: relative; display: inline-flex; }
+.dk-shape-menu { position: absolute; left: 0; top: calc(100% + 5px); z-index: 20; display: flex; flex-direction: column; gap: 2px; padding: 4px; min-width: 96px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); box-shadow: 0 8px 26px rgba(0,0,0,.16); }
+.dk-shape-menu button { padding: 6px 10px; border: none; border-radius: 5px; background: transparent; color: var(--text-2); font-size: 12px; text-align: left; cursor: pointer; }
+.dk-shape-menu button:hover { background: var(--primary-soft); color: var(--primary-deep); }
+/* 表格 7×6 格子选择器(豆包式) */
+.dk-tbl-pick { position: absolute; left: 0; top: calc(100% + 5px); z-index: 20; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); box-shadow: 0 8px 26px rgba(0,0,0,.16); }
+.dk-tbl-lab { font-size: 11px; color: var(--muted); margin-bottom: 6px; white-space: nowrap; }
+.dk-tbl-lab b { color: var(--primary-deep); }
+.dk-tbl-grid { display: grid; grid-template-columns: repeat(7, 16px); gap: 3px; }
+.dk-tbl-grid button { width: 16px; height: 16px; padding: 0; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); cursor: pointer; }
+.dk-tbl-grid button.lit { background: var(--primary); border-color: var(--primary); }
+/* 图表数据编辑弹层 */
+.dk-chart-sheet { position: absolute; inset: 0; z-index: 30; display: flex; align-items: flex-end; justify-content: center; background: rgba(0,0,0,.28); }
+.dk-ed { position: relative; }
+.dk-chart-card { width: min(680px, calc(100% - 32px)); max-height: 70%; margin-bottom: 16px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,.3); overflow: hidden; }
+.dk-chart-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; font-size: 13px; font-weight: 700; color: var(--text); border-bottom: 1px solid var(--border-soft); }
+.dk-chart-grid-wrap { overflow: auto; padding: 10px 14px; }
+.dk-chart-grid { border-collapse: collapse; width: 100%; }
+.dk-chart-grid th, .dk-chart-grid td { border: 1px solid var(--border-soft); padding: 2px; }
+.dk-chart-grid th { background: var(--bg-soft); font-size: 11px; color: var(--muted); font-weight: 600; }
+.dk-chart-grid input { width: 100%; min-width: 64px; border: none; background: transparent; color: var(--text); font-size: 12px; padding: 5px 7px; }
+.dk-chart-grid input:focus { outline: 2px solid var(--primary); border-radius: 3px; }
+.dk-chart-acts { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--border-soft); }
+/* 页面切换效果格 */
+.dk-tr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.dk-tr-grid button { padding: 7px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-2); font-size: 11px; cursor: pointer; }
+.dk-tr-grid button:hover { border-color: var(--primary); }
+.dk-tr-grid button.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-deep); font-weight: 600; }
+.dk-tr-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+.dk-tr-none { padding: 6px; border: 1px dashed var(--border); border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+.dk-tr-none.on { border-color: var(--primary); color: var(--primary-deep); border-style: solid; background: var(--primary-soft); }
+/* 动画顺序列表 */
+.dk-anim-seq { display: flex; flex-direction: column; gap: 3px; max-height: 150px; overflow-y: auto; }
+.dk-anim-row { display: flex; align-items: center; gap: 6px; padding: 4px 7px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--bg); color: var(--text-2); font-size: 11px; text-align: left; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dk-anim-row:hover { border-color: var(--primary); }
+.dk-anim-row.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-deep); }
+.dk-anim-step { flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 9.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+/* 元素属性(格式面板) */
+.dk-xywh { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.dk-xywh label, .dk-prop-row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+.dk-prop-row { justify-content: space-between; }
+.dk-xywh input, .dk-prop-row input { width: 100%; max-width: 76px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 11.5px; }
+.dk-prop-row select { max-width: 100px; padding: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 11.5px; }
+.dk-hex { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 11.5px; font-family: var(--mono); }
+.dk-xywh input:focus, .dk-prop-row input:focus, .dk-hex:focus { outline: none; border-color: var(--primary); }
+.dk-ed-body { flex: 1; min-height: 0; display: flex; }
+.dk-ed-stage { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 12px; }
+.dk-error.ws { margin: 8px 14px 0; flex-basis: auto; }
+
+/* 右:格式面板 */
+.dk-panel { width: 208px; flex-shrink: 0; overflow-y: auto; border-left: 1px solid var(--border-soft); background: var(--bg-soft); padding: 12px; display: flex; flex-direction: column; gap: 16px; }
+.dk-panel-sec { display: flex; flex-direction: column; gap: 7px; }
+.dk-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.dk-panel-row { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.dk-panel-row b { color: var(--text); font-weight: 600; }
+
+/* 预览态(播放器/iframe/等待) */
 .dk-viewer { flex: 1; min-height: 0; border: 1px solid var(--border); box-shadow: var(--shadow, 0 6px 24px rgba(0,0,0,.08)); }
 .dk-frame { flex: 1; width: 100%; border: 1px solid var(--border); border-radius: 10px; background: #fff; box-shadow: var(--shadow, 0 6px 24px rgba(0,0,0,.08)); }
 .dk-frame-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); border: 1px dashed var(--border); border-radius: 10px; }
-.dk-preview-tip { font-size: 12px; color: var(--muted); text-align: center; }
 
 /* 生成前等待面板(第一页出现即让位给播放器) */
 .dk-wait { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text); font-size: 14px; font-weight: 600; }
 .dk-wait-t { font-weight: 600; }
 .dk-tool-hint { max-width: 80%; font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* 生成中细进度条(播放器顶部,不遮内容) */
-.dk-strip { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--panel); font-size: 12.5px; color: var(--text); }
-.dk-strip b { color: var(--primary-deep); font-weight: 650; white-space: nowrap; }
-.dk-strip .dk-tool-hint { flex: 1; }
-.dk-ghost.xs { padding: 4px 8px; font-size: 11px; flex-shrink: 0; }
-
-/* 完成态工具栏:导出 + 换肤 */
-.dk-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.dk-exported { font-size: 11.5px; font-weight: 600; color: var(--ok, #2f7a4f); }
-.dk-skin { margin-left: auto; display: flex; align-items: center; gap: 5px; }
-.dk-skin-lab { font-size: 11.5px; color: var(--muted); margin-right: 2px; }
+.dk-exported { font-size: 11.5px; font-weight: 600; color: var(--ok, #2f7a4f); white-space: nowrap; }
+.dk-skin { display: flex; align-items: center; gap: 5px; }
+.dk-skin.wrap { flex-wrap: wrap; }
 .dk-skin-sw { position: relative; width: 24px; height: 24px; border-radius: 6px; border: 1.5px solid var(--border); cursor: pointer; overflow: hidden; padding: 0; }
 .dk-skin-sw:hover:not(:disabled) { border-color: var(--primary); }
 .dk-skin-sw.on { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
