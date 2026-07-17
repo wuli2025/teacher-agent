@@ -187,7 +187,7 @@ polaris.slides.json  →  polaris-forge spec-pptx  →  演示.pptx
 | `scrim` | 半透明蒙版 | `color`（默认 `#000`）、`alpha` 0–100（默认 50） |
 | `image` \| `pic` | 真图片框 | `cover`（默认 true）、`rounded`（默认 false） |
 | `table` | **真表格**（PowerPoint 里可继续编辑的原生 `a:tbl`） | `rows` 行×列文本二维数组（如 `[["科目","课时"],["数学","6"]]`）；`header`（默认 true，首行做表头=强调色底）、`size` 单元格字号（默认 14）、`widths` 各列相对宽度（可选，如 `[2,1,1]`） |
-| `chart` | **形状化图表**（导出为可选中的形状组，数据不可在 PowerPoint 里改） | `chartType`：`bar`(柱状)/`line`(折线)/`pie`(饼)/`donut`(环形)；`labels` 类目数组；`series` 数据——单系列写 `[40,65,50]`，多系列写 `[[..],[..]]`；`names` 系列名（多系列时配图例）；`title` 图表标题（可选）。饼/环只用首系列，自动生成「标签 值(占比)」图例 |
+| `chart` | 图表（两种导出形态，见下） | `chartType`：`bar`(柱状)/`line`(折线)/`pie`(饼)/`donut`(环形)；`labels` 类目数组；`series` 数据——单系列写 `[40,65,50]`，多系列写 `[[..],[..]]`；`names` 系列名（多系列时配图例）；`title` 图表标题（可选）；**`native`**：`true`=真 PowerPoint 图表（可改数据），缺省=形状组。饼/环只用首系列 |
 | `line` \| `arrow` \| `axis` | 直线 / 箭头 / 坐标轴 | 终点 `x2`（默认 `x+w`）、`y2`（默认 `y`）；`arrow`/`axis` 自带箭头，`line` 写 `"arrow": true` 也能带；`"dash": true` 虚线 |
 | `polyline` \| `curve` \| `polygon` | 折线 / 曲线 / 多边形 | `points` 点数组（**≥2 点**，不足则跳过该盒 + warning）；`polygon` 或 `"closed": true` 闭合；闭合后可 `fill` 填充 |
 | `ellipse` \| `circle` | 椭圆 / 圆 | 给 `r` → 以 `(x,y)` 为**圆心**画半径 r 的圆；不给 `r` → 用 `x/y/w/h` 当外接框。可 `fill` |
@@ -220,6 +220,24 @@ polaris.slides.json  →  polaris-forge spec-pptx  →  演示.pptx
 - 引擎生成的是**真 OOXML `<p:timing>`**，写法与 PowerPoint 自身一致 —— 放映时真能一步步点出来，导出后在 PowerPoint 里也还是真动画，不是假的。
 - **这是课件的杀手锏**：数学/物理的图「一笔笔加」（先坐标轴 → 再曲线 → 再标注）、解题步骤逐步揭示、先问后答（问题 `click:0`，答案 `click:1`）。**讲授节奏能被控制**，学生不会一上来就看到答案。
 - **只有 `freeform` 支持**；固定版式没有这个字段，写了也不读。
+
+##### `chart` 的两种导出形态：形状组（默认） vs 原生图表（`native: true`）
+
+```json
+{"type": "chart", "chartType": "bar", "native": true, "x": 60, "y": 120, "w": 560, "h": 420,
+ "title": "班级平均分", "labels": ["一班", "二班", "三班"],
+ "series": [[82, 91, 76], [70, 88, 65]], "names": ["期中", "期末"]}
+```
+
+| | 形状组（缺省） | 原生图表（`"native": true`） |
+|---|---|---|
+| 导出成什么 | 矩形/折线/扇形 + 文本标签的**形状组** | 真 OOXML 图表 part + 内嵌 xlsx 数据源 |
+| PowerPoint 里改数据 | ❌ 不能 | ✅ 右键「编辑数据」拉起工作簿 |
+| 选中改色/挪动 | ✅ 每个形状都能单独改 | ✅ 按 PowerPoint 图表的方式改 |
+| 到 WPS/Keynote/只读预览 | 处处一个样（就是一堆形状） | 取决于对方对图表的支持 |
+| 排版 | 我们算好的，与预览逐像素一致 | PowerPoint 自己重排，**我们的预览只是近似** |
+
+**怎么选**：教师课件里图表通常是「讲完就完」的静态展示 → **默认（形状组）就够，且更稳**。只有当用户明确说「我要在 PowerPoint 里改这个图的数据」「数据以后还会变」时才加 `"native": true`。两种形态的 `labels`/`series` 字段完全一样，改主意时加删这一个字段即可。
 
 ##### freeform 专属：`anim` 富元素动画（`click` 的进阶版）
 

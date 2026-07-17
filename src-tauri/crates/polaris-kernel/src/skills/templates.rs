@@ -20,7 +20,9 @@ pub(crate) const DECK_ID: &str = "polaris-deck-studio";
 // v6: freeform 新增 table(真 a:tbl 表格)/chart(形状化图表) 两类盒子;通用修饰字段
 //     rot/opacity + text 盒 font:"serif";富元素动画 anim{effect,trigger,dur,delay,dir}
 //     (13 种效果,真 p:timing);页级 transition{type,dir,speed} 切换动画(真 p:transition)。
-pub(crate) const DECK_VERSION: &str = "6";
+// v7: chart 盒新增 native:true → 导出真 OOXML 图表 part + 内嵌 xlsx 数据源
+//     (PowerPoint 里「编辑数据」可用);缺省仍是形状组。
+pub(crate) const DECK_VERSION: &str = "7";
 pub(crate) const DECK_SKILL_MD: &str =
     include_str!("../../../../src/templates/skills/polaris-deck-studio/SKILL.md");
 pub(crate) const DECK_THEMES_CSS: &str =

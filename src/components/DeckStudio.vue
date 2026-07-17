@@ -1232,7 +1232,15 @@ function fillDemo() {
                   <input type="text" :value="selBox.title ?? ''" @change="patchSel({ title: ($event.target as HTMLInputElement).value || undefined })" />
                 </label>
                 <button class="dk-ghost" style="justify-content:center" @click="openChartEditor">编辑数据</button>
-                <span class="dk-note">导出为形状组（可选中改色，PowerPoint 里不能改数）。</span>
+                <label class="dk-check">
+                  <input type="checkbox" :checked="!!selBox.native" @change="patchSel({ native: ($event.target as HTMLInputElement).checked || undefined })" />
+                  原生图表
+                </label>
+                <span class="dk-note">
+                  {{ selBox.native
+                    ? "导出为真 PowerPoint 图表：可在 PowerPoint 里「编辑数据」。预览为近似——PowerPoint 用自己的排版重绘。"
+                    : "导出为形状组：处处同一个样、可选中改色，但 PowerPoint 里不能改数。" }}
+                </span>
               </template>
               <template v-if="selIsTable">
                 <div class="dk-panel-row"><span>表格</span><b>{{ selBox.rows?.length ?? 0 }} 行 × {{ selBox.rows?.[0]?.length ?? 0 }} 列</b></div>

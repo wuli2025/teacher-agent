@@ -644,6 +644,318 @@ fn chart_shapes(
     Some((s, id))
 }
 
+// ─────────────────────── 真原生图表(c:chart) ───────────────────────
+// 与形状化图表(chart_shapes)并存:盒子写 `"native": true` 走这条。
+// 产物是**真 OOXML 图表 part** + 内嵌 xlsx 数据源 —— PowerPoint 里「编辑数据」可用、
+// 改完自动重绘,和 PowerPoint 自己插的图表没有区别。代价是 spec 改数据后要重转
+// (我们这边仍以 spec 为真源,重转会覆盖 xlsx)。
+//
+// 为什么形状化仍是默认:形状组在任何环境(WPS/Keynote/只读预览)都长一个样,
+// 且我们的 SVG 预览与它逐数字对齐;原生图表交给 PowerPoint 自己排版,预览只能近似。
+
+const CHART_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+/// freeform 图表盒的 rId 起点(避开 image 的 FREE_IMG_RID_BASE=10 一段)。
+const FREE_CHART_RID_BASE: u32 = 200;
+
+/// 一份待打包的原生图表:chart part XML + 内嵌数据源 xlsx 字节。
+struct NativeChart {
+    xml: String,
+    xlsx: Vec<u8>,
+}
+
+/// 列号 → Excel 列名(0=A)。系列最多 6 个,单字母足够,但仍按通用写法。
+fn col_name(mut i: usize) -> String {
+    let mut s = String::new();
+    loop {
+        s.insert(0, (b'A' + (i % 26) as u8) as char);
+        if i < 26 {
+            break;
+        }
+        i = i / 26 - 1;
+    }
+    s
+}
+
+/// 内嵌数据源 xlsx(zip in zip):A 列类目,B.. 列各系列;首行系列名。
+/// 用 inlineStr 存文本 → 不需要 sharedStrings part,包最小。
+fn chart_xlsx(labels: &[String], series: &[Vec<f64>], names: &[String]) -> Result<Vec<u8>, String> {
+    let mut rows = String::new();
+    // 第 1 行:A1 空 + 各系列名
+    rows.push_str("<row r=\"1\">");
+    for (si, _) in series.iter().enumerate() {
+        let nm = names.get(si).cloned().unwrap_or_else(|| format!("系列{}", si + 1));
+        rows.push_str(&format!(
+            "<c r=\"{}1\" t=\"inlineStr\"><is><t>{}</t></is></c>",
+            col_name(si + 1),
+            xml_escape(&nm)
+        ));
+    }
+    rows.push_str("</row>");
+    // 数据行:A 列类目 + 各系列值
+    for (li, lab) in labels.iter().enumerate() {
+        let r = li + 2;
+        rows.push_str(&format!("<row r=\"{r}\">"));
+        rows.push_str(&format!(
+            "<c r=\"A{r}\" t=\"inlineStr\"><is><t>{}</t></is></c>",
+            xml_escape(lab)
+        ));
+        for (si, sv) in series.iter().enumerate() {
+            let v = sv.get(li).copied().unwrap_or(0.0);
+            rows.push_str(&format!("<c r=\"{}{r}\"><v>{v}</v></c>", col_name(si + 1)));
+        }
+        rows.push_str("</row>");
+    }
+    let sheet = format!(
+        "{}<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">\
+<sheetData>{rows}</sheetData></worksheet>",
+        xml_decl()
+    );
+    let ct = format!(
+        "{}<Types xmlns=\"{NS_CT}\">\
+<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\
+<Default Extension=\"xml\" ContentType=\"application/xml\"/>\
+<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>\
+<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>\
+</Types>",
+        xml_decl()
+    );
+    let root_rels = format!(
+        "{}<Relationships xmlns=\"{NS_REL}\">\
+<Relationship Id=\"rId1\" Type=\"{NS_R}/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>",
+        xml_decl()
+    );
+    let wb = format!(
+        "{}<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"{NS_R}\">\
+<sheets><sheet name=\"Sheet1\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>",
+        xml_decl()
+    );
+    let wb_rels = format!(
+        "{}<Relationships xmlns=\"{NS_REL}\">\
+<Relationship Id=\"rId1\" Type=\"{NS_R}/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>",
+        xml_decl()
+    );
+    let buf = std::io::Cursor::new(Vec::<u8>::new());
+    let mut z = zip::ZipWriter::new(buf);
+    let opt = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, data) in [
+        ("[Content_Types].xml", ct),
+        ("_rels/.rels", root_rels),
+        ("xl/workbook.xml", wb),
+        ("xl/_rels/workbook.xml.rels", wb_rels),
+        ("xl/worksheets/sheet1.xml", sheet),
+    ] {
+        z.start_file(name, opt)
+            .map_err(|e| format!("xlsx 写 {name} 失败: {e}"))?;
+        z.write_all(data.as_bytes())
+            .map_err(|e| format!("xlsx 写入 {name} 失败: {e}"))?;
+    }
+    Ok(z
+        .finish()
+        .map_err(|e| format!("xlsx 打包失败: {e}"))?
+        .into_inner())
+}
+
+/// `<c:tx>` 系列名引用(指向 xlsx 的表头格)。
+fn chart_tx(si: usize, name: &str) -> String {
+    format!(
+        "<c:tx><c:strRef><c:f>Sheet1!${}$1</c:f><c:strCache><c:ptCount val=\"1\"/>\
+<c:pt idx=\"0\"><c:v>{}</c:v></c:pt></c:strCache></c:strRef></c:tx>",
+        col_name(si + 1),
+        xml_escape(name)
+    )
+}
+/// `<c:cat>` 类目引用 + 缓存(缓存让图表在 Excel 打开前就能显示)。
+fn chart_cat(labels: &[String]) -> String {
+    let pts: String = labels
+        .iter()
+        .enumerate()
+        .map(|(i, l)| format!("<c:pt idx=\"{i}\"><c:v>{}</c:v></c:pt>", xml_escape(l)))
+        .collect();
+    format!(
+        "<c:cat><c:strRef><c:f>Sheet1!$A$2:$A${}</c:f><c:strCache><c:ptCount val=\"{}\"/>{pts}</c:strCache></c:strRef></c:cat>",
+        labels.len() + 1,
+        labels.len()
+    )
+}
+/// `<c:val>` 数值引用 + 缓存。
+fn chart_val(si: usize, sv: &[f64], n: usize) -> String {
+    let pts: String = (0..n)
+        .map(|i| format!("<c:pt idx=\"{i}\"><c:v>{}</c:v></c:pt>", sv.get(i).copied().unwrap_or(0.0)))
+        .collect();
+    let c = col_name(si + 1);
+    format!(
+        "<c:val><c:numRef><c:f>Sheet1!${c}$2:${c}${}</c:f><c:numCache><c:formatCode>General</c:formatCode>\
+<c:ptCount val=\"{n}\"/>{pts}</c:numCache></c:numRef></c:val>",
+        n + 1
+    )
+}
+fn solid(color: &str) -> String {
+    format!("<c:spPr><a:solidFill><a:srgbClr val=\"{color}\"/></a:solidFill></c:spPr>")
+}
+
+/// chart 盒 → 原生 chart part XML。数据非法返回 None(调用方告警后退回形状化)。
+fn native_chart_xml(
+    kind: &str,
+    title: &str,
+    labels: &[String],
+    series: &[Vec<f64>],
+    names: &[String],
+    pal: &Palette,
+) -> Option<String> {
+    if labels.is_empty() || series.is_empty() {
+        return None;
+    }
+    let nl = labels.len();
+    let is_pie = kind == "pie" || kind == "donut";
+    // 标题:给了就画,没给就显式声明「无自动标题」(否则 PowerPoint 会自己塞一个系列名当标题)
+    let title_xml = if title.is_empty() {
+        "<c:autoTitleDeleted val=\"1\"/>".to_string()
+    } else {
+        format!(
+            "<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz=\"1400\" b=\"1\">\
+<a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill></a:defRPr></a:pPr>\
+<a:r><a:rPr lang=\"zh-CN\" sz=\"1400\" b=\"1\"/><a:t>{}</a:t></a:r></a:p></c:rich></c:tx>\
+<c:overlay val=\"0\"/></c:title><c:autoTitleDeleted val=\"0\"/>",
+            pal.ink,
+            xml_escape(title)
+        )
+    };
+    // 各系列 <c:ser>。元素顺序由 schema 定死,错序 PowerPoint 直接拒开(踩过 animScale 的亏,这里逐字照 spec 排)。
+    let mut sers = String::new();
+    for (si, sv) in series.iter().enumerate() {
+        let color = chart_series_color(si, pal);
+        let nm = names.get(si).cloned().unwrap_or_else(|| format!("系列{}", si + 1));
+        sers.push_str(&format!("<c:ser><c:idx val=\"{si}\"/><c:order val=\"{si}\"/>"));
+        sers.push_str(&chart_tx(si, &nm));
+        if is_pie {
+            // 饼/环:整系列不着色,逐点(dPt)上色 —— 否则所有扇区一个颜色
+            sers.push_str("<c:explosion val=\"0\"/>");
+            for li in 0..nl {
+                sers.push_str(&format!(
+                    "<c:dPt><c:idx val=\"{li}\"/><c:bubble3D val=\"0\"/>{}</c:dPt>",
+                    solid(&chart_series_color(li, pal))
+                ));
+            }
+        } else {
+            sers.push_str(&solid(&color));
+            if kind == "bar" {
+                sers.push_str("<c:invertIfNegative val=\"0\"/>");
+            } else {
+                // 折线:线色跟系列色 + 圆点标记
+                sers.push_str(&format!(
+                    "<c:marker><c:symbol val=\"circle\"/><c:size val=\"6\"/>{}</c:marker>",
+                    solid(&color)
+                ));
+            }
+        }
+        sers.push_str(&chart_cat(labels));
+        sers.push_str(&chart_val(si, sv, nl));
+        if kind == "line" {
+            sers.push_str("<c:smooth val=\"0\"/>");
+        }
+        sers.push_str("</c:ser>");
+    }
+    // 图组 + 坐标轴(饼/环无轴)
+    const AX_CAT: u64 = 111_111_111;
+    const AX_VAL: u64 = 222_222_222;
+    let axes_ref = format!("<c:axId val=\"{AX_CAT}\"/><c:axId val=\"{AX_VAL}\"/>");
+    let group = match kind {
+        "bar" => format!(
+            "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>\
+{sers}<c:gapWidth val=\"60\"/>{axes_ref}</c:barChart>"
+        ),
+        "line" => format!(
+            "<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>{sers}\
+<c:marker val=\"1\"/>{axes_ref}</c:lineChart>"
+        ),
+        "pie" => format!("<c:pieChart><c:varyColors val=\"1\"/>{sers}<c:firstSliceAng val=\"0\"/></c:pieChart>"),
+        "donut" => format!(
+            "<c:doughnutChart><c:varyColors val=\"1\"/>{sers}<c:firstSliceAng val=\"0\"/><c:holeSize val=\"50\"/></c:doughnutChart>"
+        ),
+        _ => return None,
+    };
+    let ax_txt = format!(
+        "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz=\"1000\">\
+<a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang=\"zh-CN\"/></a:p></c:txPr>",
+        pal.muted
+    );
+    let ax_line = format!(
+        "<c:spPr><a:ln><a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill></a:ln></c:spPr>",
+        pal.card_line
+    );
+    let axes = if is_pie {
+        String::new()
+    } else {
+        format!(
+            "<c:catAx><c:axId val=\"{AX_CAT}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+<c:delete val=\"0\"/><c:axPos val=\"b\"/>{ax_line}{ax_txt}<c:crossAx val=\"{AX_VAL}\"/></c:catAx>\
+<c:valAx><c:axId val=\"{AX_VAL}\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>\
+<c:delete val=\"0\"/><c:axPos val=\"l\"/>\
+<c:majorGridlines>{ax_line}</c:majorGridlines><c:numFmt formatCode=\"General\" sourceLinked=\"1\"/>\
+{ax_line}{ax_txt}<c:crossAx val=\"{AX_CAT}\"/></c:valAx>"
+        )
+    };
+    // 图例:饼/环恒有(否则看不出扇区含义);柱/折多系列才有
+    let legend = if is_pie || series.len() > 1 {
+        format!(
+            "<c:legend><c:legendPos val=\"b\"/><c:overlay val=\"0\"/>{ax_txt}</c:legend>"
+        )
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "{}<c:chartSpace xmlns:c=\"{CHART_NS}\" xmlns:a=\"{NS_A}\" xmlns:r=\"{NS_R}\">\
+<c:chart>{title_xml}<c:plotArea><c:layout/>{group}{axes}</c:plotArea>{legend}\
+<c:plotVisOnly val=\"1\"/><c:dispBlanksAs val=\"gap\"/></c:chart>\
+<c:externalData r:id=\"rId1\"><c:autoUpdate val=\"0\"/></c:externalData></c:chartSpace>",
+        xml_decl()
+    ))
+}
+
+/// 原生图表的 graphicFrame(引用 chart part)。
+fn chart_frame_xml(id: u32, rid: &str, x: i64, y: i64, w: i64, h: i64) -> String {
+    format!(
+        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"{id}\" name=\"chart{id}\"/>\
+<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>\
+<p:xfrm><a:off x=\"{}\" y=\"{}\"/><a:ext cx=\"{}\" cy=\"{}\"/></p:xfrm>\
+<a:graphic><a:graphicData uri=\"{CHART_NS}\">\
+<c:chart xmlns:c=\"{CHART_NS}\" xmlns:r=\"{NS_R}\" r:id=\"{rid}\"/></a:graphicData></a:graphic></p:graphicFrame>",
+        x * PX,
+        y * PX,
+        w * PX,
+        h * PX
+    )
+}
+
+/// chart 盒的数据解析(形状化与原生共用,保证两条路吃同一份数据)。
+fn chart_data(b: &Value) -> Option<(Vec<String>, Vec<Vec<f64>>, Vec<String>)> {
+    let labels: Vec<String> = b
+        .get("labels")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().map(|s| s.as_str().unwrap_or("").to_string()).collect())
+        .unwrap_or_default();
+    let series: Vec<Vec<f64>> = match b.get("series") {
+        Some(Value::Array(a)) if a.iter().all(|v| v.is_number()) => {
+            vec![a.iter().map(|v| v.as_f64().unwrap_or(0.0).max(0.0)).collect()]
+        }
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|row| row.as_array())
+            .map(|row| row.iter().map(|v| v.as_f64().unwrap_or(0.0).max(0.0)).collect())
+            .collect(),
+        _ => Vec::new(),
+    };
+    if labels.is_empty() || series.is_empty() || series.iter().all(|s| s.is_empty()) {
+        return None;
+    }
+    let names: Vec<String> = b
+        .get("names")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().map(|s| s.as_str().unwrap_or("").to_string()).collect())
+        .unwrap_or_default();
+    Some((labels, series, names))
+}
+
 // ─────────────────────── 配图原语 ───────────────────────
 
 /// 配图槽:spec 的 `image` 字段解析后的结果。原始像素尺寸用于算 cover 裁切,
@@ -1144,6 +1456,7 @@ fn slide_content(
     free: &[Option<SlideImage>],
     anims: &mut Vec<(u32, u32)>,
     rich: &mut Vec<RichAnim>,
+    charts: &mut Vec<NativeChart>,
 ) -> String {
     let layout = s_str(sl, "layout");
     let mut id = 10u32;
@@ -1711,6 +2024,7 @@ fn slide_content(
                 warnings.push(format!("第 {page} 页 freeform 无 boxes,出空白页"));
             }
             let mut fi = 0usize; // 第几个 image 盒子(与 free 切片、rId 对齐)
+            let mut ci = 0usize; // 第几个原生图表盒(与 charts、rId 对齐)
             for b in boxes {
                 let x = s_i64(b, "x", 0);
                 let y = s_i64(b, "y", 0);
@@ -1854,15 +2168,42 @@ fn slide_content(
                     }
                     "chart" => {
                         let kind = s_str(b, "chartType");
-                        match chart_shapes(id, kind, b, x, y, w, h, pal) {
-                            Some((xml, next_id)) => {
-                                s.push_str(&xml);
-                                id = next_id;
-                                emitted = true;
+                        // native:true → 真 c:chart part(PowerPoint 里可改数据);
+                        // 缺省 → 形状组(任何环境同一个样,且与我们的 SVG 预览逐数字对齐)。
+                        let native = s_bool(b, "native", false);
+                        let done = native
+                            .then(|| chart_data(b))
+                            .flatten()
+                            .and_then(|(labels, series, names)| {
+                                let xml = native_chart_xml(
+                                    kind, s_str(b, "title"), &labels, &series, &names, pal,
+                                )?;
+                                let xlsx = chart_xlsx(&labels, &series, &names).ok()?;
+                                Some((xml, xlsx))
+                            });
+                        if let Some((xml, xlsx)) = done {
+                            let rid = format!("rId{}", FREE_CHART_RID_BASE + ci as u32);
+                            s.push_str(&chart_frame_xml(id, &rid, x, y, w, h));
+                            id += 1;
+                            charts.push(NativeChart { xml, xlsx });
+                            ci += 1;
+                            emitted = true;
+                        } else {
+                            if native {
+                                warnings.push(format!(
+                                    "第 {page} 页原生图表构建失败(数据不全或类型不支持),已回退形状组"
+                                ));
                             }
-                            None => warnings.push(format!(
-                                "第 {page} 页 freeform 图表数据不全(需 chartType/labels/series),已跳过"
-                            )),
+                            match chart_shapes(id, kind, b, x, y, w, h, pal) {
+                                Some((xml, next_id)) => {
+                                    s.push_str(&xml);
+                                    id = next_id;
+                                    emitted = true;
+                                }
+                                None => warnings.push(format!(
+                                    "第 {page} 页 freeform 图表数据不全(需 chartType/labels/series),已跳过"
+                                )),
+                            }
                         }
                     }
                     "table" => {
@@ -2451,11 +2792,15 @@ pub fn build_pptx_from_spec(spec_json: &str, out_path: &str) -> Result<Value, St
 
     let mut slide_xmls: Vec<String> = Vec::with_capacity(n);
     let mut notes: Vec<Option<String>> = Vec::with_capacity(n);
+    // 每页的原生图表(chart part 全局编号在打包时按页顺序摊平)
+    let mut charts: Vec<Vec<NativeChart>> = Vec::with_capacity(n);
     for (i, sl) in slides.iter().enumerate() {
         let dims = images[i].as_ref().map(|im| (im.w, im.h));
         let mut anims: Vec<(u32, u32)> = Vec::new();
         let mut rich: Vec<RichAnim> = Vec::new();
-        let content = slide_content(sl, &pal, &mut warnings, i + 1, dims, &free_imgs[i], &mut anims, &mut rich);
+        let mut page_charts: Vec<NativeChart> = Vec::new();
+        let content = slide_content(sl, &pal, &mut warnings, i + 1, dims, &free_imgs[i], &mut anims, &mut rich, &mut page_charts);
+        charts.push(page_charts);
         // 有富效果走富时间线(legacy click 组照样并入);纯 click 保持原路(既有测试语义不变)。
         let timing = if rich.is_empty() { build_timing(&anims) } else { build_timing_rich(&anims, &rich) };
         let transition = build_transition(sl);
@@ -2466,6 +2811,20 @@ pub fn build_pptx_from_spec(spec_json: &str, out_path: &str) -> Result<Value, St
     let has_notes = notes.iter().any(|n| n.is_some());
     let has_images = images.iter().any(|x| x.is_some())
         || free_imgs.iter().any(|r| r.iter().any(|o| o.is_some()));
+    // chart part 全局序号:按页顺序摊平(第 i 页第 k 个图 → chart{chart_no[i][k]}.xml)
+    let mut chart_no: Vec<Vec<usize>> = Vec::with_capacity(n);
+    let mut chart_seq = 0usize;
+    for row in &charts {
+        chart_no.push(
+            row.iter()
+                .map(|_| {
+                    chart_seq += 1;
+                    chart_seq
+                })
+                .collect(),
+        );
+    }
+    let n_charts = chart_seq;
 
     if let Some(parent) = std::path::Path::new(out_path).parent() {
         if !parent.as_os_str().is_empty() {
@@ -2497,6 +2856,13 @@ pub fn build_pptx_from_spec(spec_json: &str, out_path: &str) -> Result<Value, St
         // 两种都声明:同一份 spec 里 png 与 jpg 混用是常态(生图出 png、素材是 jpg)。
         ct.push_str("<Default Extension=\"png\" ContentType=\"image/png\"/>");
         ct.push_str("<Default Extension=\"jpeg\" ContentType=\"image/jpeg\"/>");
+    }
+    if n_charts > 0 {
+        // 内嵌数据源(xlsx)按扩展名声明;每份 chart part 单独 Override
+        ct.push_str("<Default Extension=\"xlsx\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\"/>");
+        for c in 1..=n_charts {
+            ct.push_str(&format!("<Override PartName=\"/ppt/charts/chart{c}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>"));
+        }
     }
     ct.push_str("<Override PartName=\"/ppt/presentation.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml\"/>");
     ct.push_str("<Override PartName=\"/ppt/slideMasters/slideMaster1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml\"/>");
@@ -2662,6 +3028,30 @@ pub fn build_pptx_from_spec(spec_json: &str, out_path: &str) -> Result<Value, St
                     im.ext
                 ));
             }
+        }
+        // 原生图表:chart part + 内嵌数据源 xlsx + chart→xlsx 的 package 关系。
+        // rId 与渲染时(FREE_CHART_RID_BASE+k)一致;part 编号是跨页摊平的全局序号。
+        for (k, c) in charts[idx].iter().enumerate() {
+            let no = chart_no[idx][k];
+            put(&mut zip, &format!("ppt/charts/chart{no}.xml"), c.xml.as_bytes())?;
+            put(
+                &mut zip,
+                &format!("ppt/embeddings/chartData{no}.xlsx"),
+                &c.xlsx,
+            )?;
+            put(
+                &mut zip,
+                &format!("ppt/charts/_rels/chart{no}.xml.rels"),
+                format!(
+                    "{}<Relationships xmlns=\"{NS_REL}\"><Relationship Id=\"rId1\" Type=\"{NS_R}/package\" Target=\"../embeddings/chartData{no}.xlsx\"/></Relationships>",
+                    xml_decl()
+                )
+                .as_bytes(),
+            )?;
+            srels.push_str(&format!(
+                "<Relationship Id=\"rId{}\" Type=\"{NS_R}/chart\" Target=\"../charts/chart{no}.xml\"/>",
+                FREE_CHART_RID_BASE + k as u32
+            ));
         }
         srels.push_str("</Relationships>");
         put(
@@ -3119,6 +3509,92 @@ mod tests {
         assert!(s2.contains("presetClass=\"exit\""), "退出类动画");
         assert!(s2.contains("<p:to><p:strVal val=\"hidden\"/></p:to>"), "退出后隐藏");
         assert_eq!(s2.matches("<p:cond delay=\"indefinite\"/>").count(), 2, "两次单击(fly-in+with 一步,pulse+after 一步)");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn native_chart_emits_real_chart_part_with_embedded_xlsx() {
+        let dir = std::env::temp_dir().join("polaris_native_pptx_nchart");
+        let _ = std::fs::create_dir_all(&dir);
+        let out = dir.join("nchart.pptx");
+        let spec = r##"{"theme":"forest","slides":[
+            {"layout":"freeform","boxes":[
+                {"type":"chart","chartType":"bar","native":true,"x":60,"y":80,"w":540,"h":360,"title":"班级平均分",
+                 "labels":["一班","二班","三班"],"series":[[82,91,76],[70,88,65]],"names":["期中","期末"]},
+                {"type":"chart","chartType":"donut","native":true,"x":660,"y":80,"w":540,"h":360,
+                 "labels":["满意","一般"],"series":[455,655]}
+            ]},
+            {"layout":"freeform","boxes":[
+                {"type":"chart","chartType":"line","native":true,"x":60,"y":80,"w":600,"h":400,
+                 "labels":["3月","4月"],"series":[60,72]},
+                {"type":"chart","chartType":"bar","x":700,"y":80,"w":500,"h":400,
+                 "labels":["甲","乙"],"series":[3,7]}
+            ]}
+        ]}"##;
+        let r = build_pptx_from_spec(spec, &out.to_string_lossy()).expect("应成功");
+        assert_eq!(r["warnings"].as_array().unwrap().len(), 0, "不应有告警: {:?}", r["warnings"]);
+        let v = crate::forge::pptx::validate_pptx(&out.to_string_lossy()).unwrap();
+        assert!(v.ok, "校验失败: {:?}", v.errors);
+
+        let f = std::fs::File::open(&out).unwrap();
+        let mut z = zip::ZipArchive::new(f).unwrap();
+        let names: Vec<String> = z.file_names().map(|s| s.to_string()).collect();
+        // 三个 native 图表 → 三份 chart part + 三份内嵌 xlsx + 各自 rels
+        for no in 1..=3 {
+            assert!(names.contains(&format!("ppt/charts/chart{no}.xml")), "缺 chart{no}.xml");
+            assert!(names.contains(&format!("ppt/embeddings/chartData{no}.xlsx")), "缺内嵌数据源 {no}");
+            assert!(names.contains(&format!("ppt/charts/_rels/chart{no}.xml.rels")), "缺 chart{no} rels");
+        }
+        assert!(!names.contains(&"ppt/charts/chart4.xml".to_string()), "非 native 图表不该出 part");
+
+        let ct = read_part(&out, "[Content_Types].xml");
+        assert!(ct.contains("Extension=\"xlsx\""), "xlsx 扩展名声明");
+        assert!(ct.contains("/ppt/charts/chart1.xml"), "chart part Override");
+        assert!(ct.contains("drawingml.chart+xml"));
+
+        let c1 = read_part(&out, "ppt/charts/chart1.xml");
+        assert!(c1.contains("<c:barChart>") && c1.contains("<c:gapWidth"));
+        assert_eq!(c1.matches("<c:ser>").count(), 2, "两个系列");
+        assert!(c1.contains("Sheet1!$B$2:$B$4") && c1.contains("Sheet1!$C$2:$C$4"), "系列指向 B/C 列");
+        assert!(c1.contains("Sheet1!$A$2:$A$4"), "类目指向 A 列");
+        assert!(c1.contains("期中") && c1.contains("期末") && c1.contains("一班"));
+        assert!(c1.contains("<c:v>82</c:v>"), "数值进 numCache(Excel 未开也能显示)");
+        assert!(c1.contains("<c:externalData r:id=\"rId1\"/>") || c1.contains("<c:externalData r:id=\"rId1\">"), "指向内嵌数据源");
+        assert!(c1.contains("班级平均分"), "标题");
+        assert!(c1.contains("<c:catAx>") && c1.contains("<c:valAx>"), "柱状图有双轴");
+
+        let c2 = read_part(&out, "ppt/charts/chart2.xml");
+        assert!(c2.contains("<c:doughnutChart>") && c2.contains("<c:holeSize val=\"50\"/>"));
+        assert_eq!(c2.matches("<c:dPt>").count(), 2, "环形逐点上色");
+        assert!(!c2.contains("<c:catAx>"), "饼/环无轴");
+        assert!(c2.contains("<c:autoTitleDeleted val=\"1\"/>"), "无标题时显式声明");
+
+        let c3 = read_part(&out, "ppt/charts/chart3.xml");
+        assert!(c3.contains("<c:lineChart>") && c3.contains("<c:marker val=\"1\"/>"));
+
+        // 内嵌 xlsx 是真 zip:能解出 workbook 与 sheet,且数据落格正确
+        let mut xf = z.by_name("ppt/embeddings/chartData1.xlsx").unwrap();
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut xf, &mut buf).unwrap();
+        let mut xz = zip::ZipArchive::new(std::io::Cursor::new(buf)).unwrap();
+        let xnames: Vec<String> = xz.file_names().map(|s| s.to_string()).collect();
+        for want in ["[Content_Types].xml", "_rels/.rels", "xl/workbook.xml", "xl/worksheets/sheet1.xml"] {
+            assert!(xnames.contains(&want.to_string()), "内嵌 xlsx 缺 {want}");
+        }
+        let mut sheet = String::new();
+        {
+            let mut s = xz.by_name("xl/worksheets/sheet1.xml").unwrap();
+            std::io::Read::read_to_string(&mut s, &mut sheet).unwrap();
+        }
+        assert!(sheet.contains("<c r=\"B1\" t=\"inlineStr\"><is><t>期中</t></is></c>"), "B1=系列名");
+        assert!(sheet.contains("<c r=\"A2\" t=\"inlineStr\"><is><t>一班</t></is></c>"), "A2=首个类目");
+        assert!(sheet.contains("<c r=\"B2\"><v>82</v></c>"), "B2=首个数值");
+        assert!(sheet.contains("<c r=\"C4\"><v>65</v></c>"), "C4=第二系列末值");
+
+        // 非 native 的那个仍是形状组(矩形柱)
+        let s2 = read_part(&out, "ppt/slides/slide2.xml");
+        assert!(s2.contains("r:id=\"rId200\""), "native 图表用 chart rId");
+        assert!(s2.contains("prstGeom prst=\"rect\""), "同页的形状化图表仍出矩形");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -115,12 +115,14 @@ export interface FreeBox {
   rows?: string[][];
   header?: boolean;
   widths?: number[];
-  /** chart 盒(形状化图表):bar|line|pie|donut + 类目 + 数据(单系列或多系列)。 */
+  /** chart 盒:bar|line|pie|donut + 类目 + 数据(单系列或多系列)。 */
   chartType?: string;
   labels?: string[];
   series?: number[] | number[][];
   names?: string[];
   title?: string;
+  /** true=导出真 OOXML 图表(PowerPoint 里可改数据);缺省=形状组(处处同款,预览逐数字对齐)。 */
+  native?: boolean;
   /** 第 N 次单击时淡入(0/缺省=随页显示)。预览渲染全部盒子(= 动画播完的终态)。 */
   click?: number;
   /** 富元素动画(引擎写真 p:timing,放映模式 CSS 同构播放)。 */
