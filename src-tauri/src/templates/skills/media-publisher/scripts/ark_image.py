@@ -37,7 +37,9 @@ except Exception:  # pragma: no cover
     requests = None
 
 # ───────────────────────── 默认配置（无 ark.json 时用）─────────────────────────
-DEFAULT_API_KEY = "ark-REMOVED-CONFIGURE-YOUR-OWN-KEY"  # 粉丝福利默认，用户可改
+# key 默认留空：用户须在设置页填自己的方舟 key。曾经这里内置一把「粉丝福利」共享 key，
+# v1.0.3 仓库转 public 时移除（明文 key 挂公开仓会被爬虫秒扫刷爆，所有人一起坏）。
+DEFAULT_API_KEY = ""
 DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_IMAGE_MODEL = "doubao-seedream-4-5"
 
@@ -70,7 +72,12 @@ def _load_config():
         except Exception as e:
             _log("config_read_failed", ok=False, error=str(e), fallback="内置默认")
     else:
-        _log("config_default", note="未找到 ark.json，用内置默认 key")
+        _log("config_default", note="未找到 ark.json")
+    # 没有 key 就别发请求了：空 key 只会换回一个 401，报错信息还看不出是「没配」。
+    if not (api_key or "").strip():
+        _log("config_missing_key", ok=False,
+             error="未配置方舟 API Key。在设置页填入，或写进 %s 的 api_key 字段。" % path)
+        sys.exit(2)
     return api_key, base_url, image_model
 
 

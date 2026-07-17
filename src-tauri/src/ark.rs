@@ -17,11 +17,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-// ───────────────────────── 默认值（粉丝福利种子） ─────────────────────────
+// ───────────────────────── 默认值 ─────────────────────────
 
-/// 粉丝福利默认 key（用户可在设置页改）。仅连通测试可用；生图/聊天需在方舟控制台
-/// 为该账号**开通对应模型**后才能调用（未开通会收到 ModelNotOpen）。
-const DEFAULT_API_KEY: &str = "ark-REMOVED-CONFIGURE-YOUR-OWN-KEY";
+/// 默认**留空**：用户须在设置页填自己的方舟 key。
+///
+/// 曾经这里内置一把「粉丝福利」共享 key 让用户开箱即用。v1.0.3 仓库转 public 时移除：
+/// 明文 key 挂在公开仓上会被爬虫秒扫、刷爆后所有人一起坏，反而比让用户自己填更糟。
+/// 空值不用额外分支——ark_test / 生图 / 聊天四个入口本来就有 `api_key.trim().is_empty()`
+/// 守卫，会直接提示「未配置 API Key」。
+const DEFAULT_API_KEY: &str = "";
 const DEFAULT_BASE_URL: &str = "https://ark.cn-beijing.volces.com/api/v3";
 /// 生图模型：doubao-seedream 4.5（2026-07 实测该账号区域内存在且在线的最新稳定版本 id）。
 /// 方舟 OpenAI 兼容接口按**完整版本 id** 校验（短别名 `doubao-seedream-4-5` 会 NotFound），故写全。
