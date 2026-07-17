@@ -101,10 +101,12 @@ fn run(cmd: &str, args: &[String]) -> Result<Value, String> {
     match cmd {
         "preflight" => Ok(app::forge::forge_preflight()),
         "spec-pptx" => app::forge::spec_to_pptx_sync(req(args, "spec")?, req(args, "out")?),
-        "image" => app::forge::image::generate(
-            &req(args, "prompt")?,
-            &req(args, "out")?,
-            flag(args, "ratio").as_deref(),
+        // 走壳桥接而非直调引擎:ImageCfg(endpoint/model/key)由 kernel 供应商坞解析注入,
+        // 与桌面端同一条路 —— 直调 generate 会绕开配置层(引擎签名加 cfg 后 CLI 曾在此失配)。
+        "image" => app::imagegen::forge_image_sync(
+            req(args, "prompt")?,
+            req(args, "out")?,
+            flag(args, "ratio"),
         ),
         "pptx" => app::forge::pptx::render_deck_to_pptx(
             &req(args, "deck")?,
