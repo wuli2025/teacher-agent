@@ -176,9 +176,10 @@ function buildPrompt(): string {
   const themeLine =
     selectedTheme.value === "auto"
       ? isPpt.value
-        ? "AI 自由发挥 —— 从 SKILL.md 列出的 **6 套内置色板**里挑气质最贴合内容的一个填进 " +
-          "`spec.theme`（课件默认优先浅色板，教室投影下深色底常糊）。版式混排要讲究：" +
-          "按信息类型选 compare/timeline/stats/two-col，**通篇 bullets 视为失败**。"
+        ? "AI 自由发挥 —— 从 SKILL.md 列出的 **7 套内置色板**里挑气质最贴合内容的一个填进 " +
+          "`spec.theme`（课堂课件优先浅色板，教室投影下深色底常糊；汇报/评审/报告拆解类优先 " +
+          "midnight-gold 深色板）。版式混排要讲究：按信息类型选 compare/timeline/stats/two-col，" +
+          "**通篇 bullets 视为失败**；≥8 页务必按 SKILL.md 的叙事骨架带上 freeform 编号目录页与 section 章节页。"
         : "AI 自由发挥 —— 视觉方向由你根据内容的气质与场景自行决定：从 skill 的 themes.css 全部 " +
           "`data-theme` 主题里挑最贴合的一个，也可在所选主题之上自行调配色与版式。两条硬要求：" +
           "①**必须基于 polaris-deck-studio 的主题体系制作**，别脱离 skill 自起炉灶；" +
@@ -191,7 +192,7 @@ function buildPrompt(): string {
     `- 输出模式：${isPpt.value
       ? "pptx——传统 PPT（**原生可编辑**）。不写 deck.html，改为产出结构化 spec 文件 polaris.slides.json，再转换成真文本框/真形状、100% 可编辑的 .pptx（spec v1 格式见 SKILL.md「一、spec v1 格式」）"
       : "html（最终交付自包含单文件 .html）"}`,
-    `- 主题：${themeLine}${isPpt.value && selectedTheme.value !== "auto" ? "——传统 PPT 走 spec 内置 6 色板(minimal-white/warm-paper/forest/tech-blue/ink-gold/deep-space)，从中选气质最接近所选主题的一个填 spec.theme" : ""}`,
+    `- 主题：${themeLine}${isPpt.value && selectedTheme.value !== "auto" ? "——传统 PPT 走 spec 内置 7 色板(minimal-white/warm-paper/forest/tech-blue/ink-gold/deep-space/midnight-gold)，从中选气质最接近所选主题的一个填 spec.theme" : ""}`,
     `- 画幅比例：${effAspect.value}${isPpt.value ? "（引擎固定，无需也无法调整）" : ""}`,
     autoSlides.value
       ? "- 页数：由你按篇幅与重点自行决定（内容多则多页、少则少页，重点处展开讲透，别硬凑也别硬砍）"
@@ -1050,14 +1051,12 @@ function fillDemo() {
               <Play :size="13" /> 放映
             </button>
             <button
-              v-if="isPpt && previewSpec && phase === 'done'"
+              v-if="isPpt && previewSpec && phase === 'done' && !viewerRef?.curIsFreeform"
               class="dk-ghost"
-              :class="{ on: viewerRef?.freeEdit }"
-              :title="viewerRef?.curIsFreeform ? '元素级编辑：拖拽移动 / 拉手柄缩放 / 双击文本改字' : '把本页解锁成自由版式后可拖拽元素（不可逆）'"
+              title="把本页解锁成自由版式：元素可拖拽移动 / 拉手柄缩放（不可逆）。改文字不用解锁，点了就能改"
               @click="viewerRef?.toggleFreeEdit()"
             >
-              <component :is="viewerRef?.curIsFreeform ? MousePointer2 : Unlock" :size="13" />
-              {{ viewerRef?.freeEdit ? "完成编辑" : "编辑" }}
+              <Unlock :size="13" /> 解锁拖拽
             </button>
             <button v-if="isPpt && specOut" class="dk-primary sm" :disabled="exporting || phase === 'generating'" @click="exportPptx">
               <Loader v-if="exporting" :size="13" class="spin" /><FileType2 v-else :size="13" />

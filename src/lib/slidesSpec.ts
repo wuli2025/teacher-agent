@@ -169,6 +169,7 @@ interface Palette {
 
 /** 与 forge_pptx_native.rs 的 PALETTES 保持同步(色值一致)。 */
 const PALETTES: Record<string, Palette> = {
+  "midnight-gold":{ bg1: "#0A0E1A", bg2: "#1C2236", ink: "#F4F1E8", muted: "#9AA1B3", accent: "#E2C078", card: "#151B2C", cardLine: "#2A3149" },
   "ink-gold":     { bg1: "#16181D", bg2: "#1F232B", ink: "#F2F0E9", muted: "#A8A49A", accent: "#D4B06A", card: "#20242C", cardLine: "#2E333D" },
   "deep-space":   { bg1: "#0B0F1A", bg2: "#131A2A", ink: "#E8ECF6", muted: "#93A0B8", accent: "#7AA2F7", card: "#16203A", cardLine: "#263250" },
   "warm-paper":   { bg1: "#FAF6EE", bg2: "#F3EDE0", ink: "#3A2F25", muted: "#8A7E6F", accent: "#B3672A", card: "#FFFFFF", cardLine: "#E5DCCB" },
@@ -188,6 +189,7 @@ export const NATIVE_THEME_META: { id: string; name: string; bg: string; accent: 
   { id: "tech-blue", name: "科技蓝", bg: PALETTES["tech-blue"].bg1, accent: PALETTES["tech-blue"].accent, ink: PALETTES["tech-blue"].ink },
   { id: "ink-gold", name: "墨金", bg: PALETTES["ink-gold"].bg1, accent: PALETTES["ink-gold"].accent, ink: PALETTES["ink-gold"].ink },
   { id: "deep-space", name: "深空", bg: PALETTES["deep-space"].bg1, accent: PALETTES["deep-space"].accent, ink: PALETTES["deep-space"].ink },
+  { id: "midnight-gold", name: "夜金", bg: PALETTES["midnight-gold"].bg1, accent: PALETTES["midnight-gold"].accent, ink: PALETTES["midnight-gold"].ink },
 ];
 
 /**

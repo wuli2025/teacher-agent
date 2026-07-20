@@ -279,7 +279,7 @@ const clearMsg = ref("");
 async function doClear() {
   if (
     !confirm(
-      "确定清空整个资料库吗?\n这会删除全部资料(含已安装的名人资料包),且不可撤销;资料包可在「名人资料包」里重新安装。"
+      "确定清空整个资料库吗?\n这会删除全部资料,且不可撤销。"
     )
   )
     return;
@@ -554,12 +554,10 @@ function sendTableCmd() {
     </div>
 
     <div class="head">
-      <div class="title">名人知识库</div>
+      <div class="title">知识库</div>
       <div class="tabs">
         <button
           v-for="t in [
-            { k: 'overview', l: '概览' },
-            { k: 'packs', l: '名人资料包' },
             { k: 'browse', l: '浏览' },
             { k: 'manage', l: '管理' },
           ]"
@@ -580,154 +578,6 @@ function sendTableCmd() {
         <span class="root-label">KB 根:</span>
         <code>{{ rootPath }}</code>
       </div>
-    </div>
-
-    <div v-if="tab === 'overview'" class="body overview rg">
-      <!-- 扫描入口 -->
-      <div class="rg-hero glass">
-        <div class="rg-hero-title">把电脑炼成你的数据库</div>
-        <div class="rg-hero-sub">
-          扫描盘里散落的有用文件 → 逐文件看清内容 → 一键<b class="b-core">归入核心层</b>(大模型把资料编译成可检索的知识灵魂)。暂时把整台电脑都当成你的数据库。
-        </div>
-        <div class="rg-roots">
-          <button
-            v-for="r in scanRoots"
-            :key="r.id"
-            class="rg-rootchip"
-            :class="{ on: r.defaultOn }"
-            @click="toggleRoot(r)"
-          >
-            <span class="dot"></span>{{ r.label }}
-          </button>
-          <span v-if="rootsLoaded && !scanRoots.length" class="muted">未发现可扫描的盘/目录</span>
-        </div>
-      </div>
-
-      <!-- 多维表格 -->
-      <div v-if="rows.length" class="rg-table glass">
-        <div class="rg-ttop">
-          <span class="rg-ttitle">扫描结果 · 已按价值预选</span>
-          <span class="rg-tmeta">
-            勾选 <b class="b-core">{{ checkedCount }}</b> · {{ humanBytes(checkedBytes) }}
-          </span>
-          <span class="rg-spacer"></span>
-          <button class="rg-chip" @click="selectAll(true)">全选</button>
-          <button class="rg-chip" @click="selectAll(false)">全不选</button>
-          <button class="rg-chip gold" :disabled="archiving || !checkedCount" @click="archiveToCore">
-            归入核心层 {{ checkedCount }}
-          </button>
-        </div>
-        <div class="rg-row rg-hd">
-          <span class="c-cb"></span>
-          <span class="c-name">文件名</span>
-          <span class="c-ty">类型</span>
-          <span class="c-prev">大概内容</span>
-          <span class="c-size">大小</span>
-          <span class="c-score">价值</span>
-        </div>
-        <!-- 虚拟滚动:行等高 46px、各列 nowrap+ellipsis(见 .rg-row CSS),DOM 里只保留视口内
-             十几行。于是几万条扫描结果也秒开、不再硬截断到 600;v-model 绑定的是数据对象
-             item.checked(非 DOM 节点),配合 key-field=id,回收复用不会串值。 -->
-        <RecycleScroller
-          class="rg-list"
-          :items="rows"
-          :item-size="46"
-          key-field="id"
-          v-slot="{ item }"
-        >
-          <div
-            class="rg-row"
-            :class="{ dim: !item.checked }"
-            @click="item.checked = !item.checked"
-          >
-            <span class="c-cb">
-              <input type="checkbox" v-model="item.checked" @click.stop />
-            </span>
-            <span class="c-name" :title="item.path">{{ item.name }}</span>
-            <span class="c-ty"><span class="ty" :class="'ty-' + item.kind">{{ kindLabel[item.kind] || item.kind }}</span></span>
-            <span class="c-prev" :title="item.preview">{{ item.preview }}</span>
-            <span class="c-size">{{ item.sizeH }}</span>
-            <span class="c-score">{{ "★".repeat(item.score) }}</span>
-          </div>
-        </RecycleScroller>
-        <div v-if="archiveMsg" class="rg-archmsg">{{ archiveMsg }}</div>
-      </div>
-      <div v-else-if="scanMeta && !resScanning" class="rg-empty muted">
-        没扫到可归档的资源(命中 0)。换个扫描范围试试。
-      </div>
-      <div v-else-if="!resScanning" class="rg-empty muted">
-        到「文件中心」点「盘点」扫描你的盘 —— 扫到的有用文件会归入核心层,在这里连成知识网。
-      </div>
-
-      <!-- 表格对话框 -->
-      <div v-if="rows.length" class="rg-chat glass">
-        <div class="rg-chat-head">✦ 和这张表说话</div>
-        <div v-if="chatLog.length" class="rg-chat-body">
-          <div
-            v-for="(m, i) in chatLog"
-            :key="i"
-            class="rg-bubble"
-            :class="m.role"
-          >
-            {{ m.text }}
-          </div>
-        </div>
-        <div class="rg-chat-input">
-          <input
-            v-model="chatInput"
-            placeholder="例:把图片都取消 / 取消两年没动的 / 只留近一年 / 全部归入核心层"
-            @keydown.enter="sendTableCmd"
-          />
-          <button class="rg-primary sm" @click="sendTableCmd">发送</button>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="tab === 'packs'" class="body packs">
-      <div class="packs-intro">
-        名人资料包:把名人的著作资料<strong>下载到自己的资料库</strong>(<code>raw/</code> 下),
-        并附带安装配套技能 —— 技能里写好了这个资料库的使用方法,装完即可在对话里直接请教。
-      </div>
-      <div class="pack-grid">
-        <div v-for="p in packs" :key="p.id" class="card pack-card">
-          <div class="pack-head">
-            <div class="card-title">{{ p.name }}</div>
-            <span v-if="p.installed" class="pack-badge installed">已装入</span>
-          </div>
-          <div class="card-body">{{ p.description }}</div>
-          <div class="pack-skill">
-            <Sparkles :size="13" :stroke-width="1.8" />
-            <span>配套技能:<code>{{ p.skillId }}</code></span>
-          </div>
-          <div class="pack-actions">
-            <button
-              v-if="!p.installed"
-              class="primary-btn"
-              :disabled="packBusy === p.id"
-              @click="installPack(p)"
-            >
-              <OrbitSpinner
-                v-if="packBusy === p.id"
-                :size="14"
-              />
-              <Download v-else :size="14" :stroke-width="1.8" />
-              <span>{{ packBusy === p.id ? "正在装入…" : "下载到我的资料库" }}</span>
-            </button>
-            <button
-              v-else
-              class="btn"
-              :disabled="packBusy === p.id"
-              @click="removePack(p)"
-            >
-              {{ packBusy === p.id ? "正在移除…" : "移除" }}
-            </button>
-          </div>
-        </div>
-        <div v-if="!packs.length" class="muted empty">
-          暂无可用资料包(浏览器模式或资源目录缺失)
-        </div>
-      </div>
-      <div v-if="packMsg" class="muted pack-msg">{{ packMsg }}</div>
     </div>
 
     <div v-if="tab === 'browse'" class="body browse">
@@ -955,9 +805,8 @@ function sendTableCmd() {
       <div class="card danger-card">
         <div class="card-title">清空资料库</div>
         <div class="card-body">
-          删除 <code>raw/</code> 下的<strong>全部资料</strong>(含已安装的名人资料包),
-          保留目录结构。此操作<strong>不可撤销</strong>;名人资料包可在「名人资料包」tab
-          重新安装。也可在「浏览」里逐条点 × 删除单份资料。
+          删除 <code>raw/</code> 下的<strong>全部资料</strong>,保留目录结构。
+          此操作<strong>不可撤销</strong>。也可在「浏览」里逐条点 × 删除单份资料。
         </div>
         <button class="danger-btn" @click="doClear">
           <Trash2 :size="14" :stroke-width="1.8" />
@@ -977,58 +826,88 @@ function sendTableCmd() {
   position: relative;
 }
 .head {
-  padding: 18px 28px 0;
+  padding: 26px 32px 0;
   border-bottom: 1px solid var(--hairline);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "title root"
+    "tabs  tabs";
+  align-items: baseline;
 }
 .title {
+  grid-area: title;
   font-family: var(--serif);
-  font-size: 18px;
-  letter-spacing: 2px;
+  font-size: 21px;
+  letter-spacing: 4px;
   color: var(--ink);
+  font-weight: 600;
 }
 .tabs {
-  margin-top: 14px;
+  grid-area: tabs;
+  margin-top: 18px;
   display: flex;
-  gap: 18px;
+  align-items: center;
+  gap: 26px;
 }
 .tab {
+  position: relative;
   background: transparent;
   border: none;
-  padding: 8px 0;
+  padding: 8px 2px 12px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 13.5px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+.tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--ink);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.22s ease;
+}
+.tab:hover {
+  color: var(--text);
 }
 .tab.active {
-  color: var(--text);
+  color: var(--ink);
   font-weight: 600;
-  border-bottom: 2px solid var(--ink);
+}
+.tab.active::after {
+  transform: scaleX(1);
 }
 .tab-graph {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  margin-left: 4px;
-  padding-left: 16px;
-  border-left: 1px solid var(--border-soft);
-  color: var(--primary);
+  gap: 6px;
+  color: var(--muted);
+}
+.tab-graph::after {
+  background: var(--primary);
 }
 .tab-graph:hover {
-  color: var(--text);
+  color: var(--primary);
 }
 .root {
-  margin-top: 8px;
+  grid-area: root;
   font-size: 11px;
   color: var(--muted);
-  padding-bottom: 8px;
+  min-width: 0;
 }
 .root-label {
   margin-right: 6px;
 }
 .root code {
-  background: var(--code-bg);
-  padding: 1px 6px;
-  border-radius: 2px;
   font-family: var(--mono);
+  color: var(--muted);
+  opacity: 0.85;
 }
 
 .body {

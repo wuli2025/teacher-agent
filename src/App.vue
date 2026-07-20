@@ -20,6 +20,7 @@ import VoiceOverlay from "./components/VoiceOverlay.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import TaskCenter from "./components/TaskCenter.vue";
 import FaultBoundary from "./components/FaultBoundary.vue";
+import { PanelLeftOpen } from "@lucide/vue";
 import { useHotkeys } from "./composables/useHotkeys";
 import { installMarkdownDelegation } from "./lib/markdown";
 import { openUrl, onWsStatus, isTauri, files as fc } from "./tauri";
@@ -285,6 +286,7 @@ function onEnvDone() {
 
 // 预览成品文件时把右侧抽屉拓宽；展开模式更宽，让观看更好看。
 // 用户在收缩条上拖过的宽度（drawerWidths）优先于自适应默认档位。
+// 没有任何预览对象时右侧整列 0 宽 —— 默认「文件抽屉」已删,右侧只随成品/项目预览出现。
 const drawerTrack = computed(() => {
   const w = app.drawerWidths;
   if (artifacts.current) {
@@ -297,7 +299,7 @@ const drawerTrack = computed(() => {
   if (projectsStore.activeRoot) {
     return w.preview ? `min(${w.preview}px, 80vw)` : "clamp(460px, 46vw, 860px)";
   }
-  return `${app.drawerWidth}px`;
+  return "0px";
 });
 
 const layoutCols = computed(
@@ -354,6 +356,17 @@ function startSbDrag(e: MouseEvent) {
         title="拖拽调节侧栏宽度"
         @mousedown.prevent="startSbDrag"
       ></div>
+      <!-- 侧栏收起后的「左上角收纳」浮钮(豆包式):整列消失,靠它随时唤回 -->
+      <Transition name="sb-peek">
+        <button
+          v-if="app.sidebarCollapsed"
+          class="sb-restore"
+          title="展开侧栏 (Ctrl+B)"
+          @click="app.toggleSidebar()"
+        >
+          <PanelLeftOpen :size="16" :stroke-width="1.7" />
+        </button>
+      </Transition>
       <!-- 重视图(图谱/沙箱)用 KeepAlive 缓存：第一次进算一次，之后切走再回来瞬开，
            且离开时其动画/自转随 DOM 脱离自动暂停，不在后台空耗。其余视图照常按需挂载。
            四个工坊也缓存：生成/修改是多轮流程(phase/convId/产物预览都在组件态里)，
@@ -469,6 +482,39 @@ function startSbDrag(e: MouseEvent) {
 }
 .sb-resizer:hover {
   background: var(--primary-soft);
+}
+/* 侧栏唤回浮钮:贴主区左上角,半透明玻璃底,不压视图自己的顶栏内容 */
+.sb-restore {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 40;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-chat) 82%, transparent);
+  backdrop-filter: blur(6px);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: background 0.15s, color 0.15s;
+}
+.sb-restore:hover {
+  background: var(--selection-bg);
+  color: var(--text);
+}
+.sb-peek-enter-active,
+.sb-peek-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.sb-peek-enter-from,
+.sb-peek-leave-to {
+  opacity: 0;
+  transform: translateX(-6px);
 }
 /* 黑夜模式（仿 Codex）：中性石墨框面，无辉光 */
 html[data-theme="dark"] .shell {

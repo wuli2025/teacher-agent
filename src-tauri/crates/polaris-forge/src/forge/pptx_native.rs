@@ -95,6 +95,19 @@ struct Palette {
 
 fn palette(name: &str) -> (&'static str, Palette) {
     match name {
+        // 深蓝黑渐变 + 香槟金:发布会/评审汇报的「高级感」首选深色板(与 slidesSpec.ts 逐字节同步)
+        "midnight-gold" => (
+            "midnight-gold",
+            Palette {
+                bg1: "0A0E1A",
+                bg2: "1C2236",
+                ink: "F4F1E8",
+                muted: "9AA1B3",
+                accent: "E2C078",
+                card: "151B2C",
+                card_line: "2A3149",
+            },
+        ),
         "ink-gold" => (
             "ink-gold",
             Palette {

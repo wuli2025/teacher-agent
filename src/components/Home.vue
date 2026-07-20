@@ -166,7 +166,6 @@ async function generate() {
     // 进入工作台：中间对话流 + 右侧大预览（产物产出后右抽屉自动展开）
     input.value = "";
     uploads.value = [];
-    app.drawerCollapsed = false;
     app.setView("chat");
   } catch (e: any) {
     toast.error(`生成失败：${e?.message ?? e}`);

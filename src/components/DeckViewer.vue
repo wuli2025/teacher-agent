@@ -8,7 +8,7 @@
 // 不再有 iframe 整体重载,页码天然保持。
 import { computed, ref, watch, onBeforeUnmount, nextTick } from "vue";
 import {
-  ChevronLeft, ChevronRight, Loader, PencilLine, Check, Play, Copy, Trash2,
+  ChevronLeft, ChevronRight, Loader, Copy, Trash2,
   ArrowUp, ArrowDown, Plus, Undo2, StickyNote, X,
 } from "@lucide/vue";
 import {
@@ -335,39 +335,20 @@ function saveNotes() {
 }
 
 // ───────── 自由编辑(元素级) ─────────
-// 语义页先「解锁」成 freeform(不可逆,弹一次确认);freeform 页直接进覆盖层编辑。
+// 语义页点「编辑」即**静默**展开成 freeform(不再弹确认 —— 用户要的就是点开就能拖)。
+// 这一步仍是一步 op,Ctrl+Z 可整步撤回。
 const curSlide = computed(() => (props.spec as any)?.slides?.[page.value] as any);
 const curIsFreeform = computed(() => String(curSlide.value?.layout ?? "") === "freeform");
 const curBoxes = computed<FreeBox[]>(() => (Array.isArray(curSlide.value?.boxes) ? curSlide.value.boxes : []));
-const freeEdit = ref(false);
-const unlockAsk = ref(false);
+// 常开编辑(豆包式):不再有「编辑/完成编辑」开关 —— freeform 页手柄自动出现,
+// 语义页点字直改。生成中 canOp 为 false,两种编辑随之自动关闭。
+const freeEdit = computed(() => canOp.value && curIsFreeform.value);
 const ffeRef = ref<InstanceType<typeof FreeformEditor> | null>(null);
+/** 把当前语义页解锁成自由版式(不可逆,一步 op 可撤销);解锁后拖拽手柄自动出现。 */
 function toggleFreeEdit() {
-  if (!canOp.value) return;
-  if (freeEdit.value) {
-    freeEdit.value = false;
-    return;
-  }
-  editing.value = false; // 与改字模式互斥
-  if (curIsFreeform.value) freeEdit.value = true;
-  else unlockAsk.value = true; // 语义页:先确认(解锁后不再 autofit,不可逆)
-}
-function confirmUnlock() {
-  unlockAsk.value = false;
+  if (!canOp.value || curIsFreeform.value) return;
   op({ kind: "freeform", index: page.value });
-  freeEdit.value = true;
 }
-// 换页/生成中退出自由编辑(每页各自解锁,不跨页粘住)
-watch(page, () => {
-  freeEdit.value = false;
-  unlockAsk.value = false;
-});
-watch(
-  () => props.generating,
-  (g) => {
-    if (g) freeEdit.value = false;
-  }
-);
 function onFfPatch(i: number, patch: Partial<FreeBox>) {
   op({ kind: "box-set", index: page.value, box: i, patch });
 }
@@ -413,7 +394,7 @@ defineExpose({ present, page, zoom, setZoom, freeEdit, curIsFreeform, toggleFree
 // 只改文字,不动版式 —— autofit 仍然生效,所以用户**改不坏排版**(这正是"版式态"的红利:
 // 豆包没有重排引擎、改字就溢出,我们改完自动重算字号)。
 // 舞台里带 data-e="<字段路径>" 的元素点一下变 contenteditable,失焦/Enter 落盘。
-const editing = ref(false); // 编辑模式开关(工具条按钮)
+const editing = computed(() => canOp.value && !freeEdit.value); // 语义页常开:点字直改,无需先点「编辑」
 const dirty = ref(false); // 有未落盘的改动(纯提示)
 const stageEl = ref<HTMLElement | null>(null);
 
@@ -459,22 +440,6 @@ function beginEdit(el: HTMLElement) {
   el.addEventListener("blur", finish, { once: true });
   el.addEventListener("keydown", onKeyEdit);
 }
-
-// 退出编辑模式前先把正在编辑的那处收尾(否则改了字却没落盘)
-function toggleEdit() {
-  if (editing.value) {
-    (stageEl.value?.querySelector("[contenteditable='true']") as HTMLElement | null)?.blur();
-  }
-  editing.value = !editing.value;
-  if (editing.value) freeEdit.value = false; // 改字与自由编辑互斥,同时开点击语义会打架
-}
-// 生成中不许编辑(spec 每 3s 被重写,改了也会被覆盖)
-watch(
-  () => props.generating,
-  (g) => {
-    if (g) editing.value = false;
-  }
-);
 
 // 选中缩略图滚进视野
 const railEl = ref<HTMLElement | null>(null);
@@ -599,9 +564,6 @@ onBeforeUnmount(() => {
         <button class="dkv-btn" :disabled="page >= pages.length - 1" @click.stop="go(page + 1, true)">
           下一页 <ChevronRight :size="14" />
         </button>
-        <button class="dkv-btn" :disabled="!pages.length" title="全屏放映（F5 · Esc 退出）" @click.stop="present">
-          <Play :size="12" /> 放映
-        </button>
         <button
           class="dkv-btn"
           :class="{ on: notesOpen }"
@@ -609,16 +571,6 @@ onBeforeUnmount(() => {
           @click.stop="notesOpen = !notesOpen"
         >
           <StickyNote :size="12" /> 备注<span v-if="curNotes" class="dkv-dot" />
-        </button>
-        <button
-          v-if="editable && !generating"
-          class="dkv-btn edit"
-          :class="{ on: editing }"
-          :title="editing ? '完成编辑' : '改字：点任意文字直接改，排版自动重算'"
-          @click.stop="toggleEdit"
-        >
-          <component :is="editing ? Check : PencilLine" :size="13" />
-          {{ editing ? "完成" : "改字" }}
         </button>
         <button
           v-if="editable && !generating"
@@ -632,15 +584,6 @@ onBeforeUnmount(() => {
         <span v-if="editing" class="dkv-tip">点文字直接改 · Enter 保存 · Esc 撤销</span>
         <span v-else-if="dirty" class="dkv-tip ok">已保存改动</span>
         <span v-if="generating" class="dkv-gen"><Loader :size="12" class="dkv-spin" /> 生成中…</span>
-      </div>
-      <!-- 解锁确认:挂在主区而非底栏内 —— 底栏 overflow:hidden 会把向上弹的层整个剪没
-           (真实用户点不到「解锁并编辑」,验证抓到的 bug)。 -->
-      <div v-if="unlockAsk" class="dkv-unlock" @click.stop>
-        <p>把本页展开成<b>自由版式</b>：元素可拖拽/缩放，但此后<b>不再自动重排</b>（不可逆，可 Ctrl+Z 撤销这一步）。</p>
-        <div class="dkv-unlock-btns">
-          <button class="ok" @click="confirmUnlock">解锁并编辑</button>
-          <button @click="unlockAsk = false">取消</button>
-        </div>
       </div>
     </main>
 
@@ -733,12 +676,6 @@ onBeforeUnmount(() => {
 /* 解锁确认:锚在 .dkv-main(position:relative)上,贴底栏上缘居中 —— 不进底栏子树,
    否则被 .dkv-bar 的 overflow:hidden 整个剪没 */
 .dkv-main { position: relative; }
-.dkv-unlock { position: absolute; bottom: 52px; left: 50%; transform: translateX(-50%); z-index: 8; width: 262px; padding: 12px; border-radius: 9px; background: #2e2e34; border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); }
-.dkv-unlock p { margin: 0 0 10px; font-size: 11.5px; line-height: 1.6; color: #d8d8de; text-align: left; white-space: normal; }
-.dkv-unlock b { color: #fff; }
-.dkv-unlock-btns { display: flex; gap: 6px; justify-content: flex-end; }
-.dkv-unlock-btns button { padding: 5px 12px; border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 6px; background: rgba(255, 255, 255, 0.06); color: #e4e4e8; font-size: 11.5px; cursor: pointer; }
-.dkv-unlock-btns button.ok { background: var(--primary, #7fa8d4); border-color: var(--primary, #7fa8d4); color: #fff; font-weight: 600; }
 /* 本页已有备注的小红点:不用数字、不用文案,一眼可见哪页写过口播稿 */
 .dkv-dot { display: inline-block; width: 5px; height: 5px; margin-left: 4px; border-radius: 50%; background: #6cbf8f; vertical-align: middle; }
 /* 备注条:舞台与工具条之间的一横条,不抢舞台高度 */

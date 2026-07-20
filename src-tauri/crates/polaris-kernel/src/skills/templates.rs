@@ -22,7 +22,10 @@ pub(crate) const DECK_ID: &str = "polaris-deck-studio";
 //     (13 种效果,真 p:timing);页级 transition{type,dir,speed} 切换动画(真 p:transition)。
 // v7: chart 盒新增 native:true → 导出真 OOXML 图表 part + 内嵌 xlsx 数据源
 //     (PowerPoint 里「编辑数据」可用);缺省仍是形状组。
-pub(crate) const DECK_VERSION: &str = "7";
+// v8: 色板 6→7(新增 midnight-gold 深蓝黑+香槟金,高级感首选);「叙事骨架」硬要求:
+//     ≥8 页必须 封面→freeform 编号目录页→section 章节页→closing,附四章目录页 JSON 样例;
+//     封面/章节页 fade transition 指引。
+pub(crate) const DECK_VERSION: &str = "8";
 pub(crate) const DECK_SKILL_MD: &str =
     include_str!("../../../../src/templates/skills/polaris-deck-studio/SKILL.md");
 pub(crate) const DECK_THEMES_CSS: &str =

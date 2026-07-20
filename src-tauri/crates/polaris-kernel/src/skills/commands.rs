@@ -28,8 +28,12 @@ fn list_skills_sync() -> Vec<SkillMeta> {
 
     let mut list = Vec::new();
 
-    // 1. 目录技能（市场 + 预装）
+    // 1. 目录技能（市场 + 预装）。教师助手技能中心只展示教师相关技能:
+    // 自媒体运营那批仍留在 catalog 供 mediaops/专家团内部 find() 调用,但不进列表。
     for c in &cat {
+        if skill_category(c.id) == "自媒体运营" {
+            continue;
+        }
         let in_user_dir = user_ids.contains(c.id);
         list.push(SkillMeta {
             id: c.id.into(),

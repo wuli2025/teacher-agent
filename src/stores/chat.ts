@@ -451,7 +451,6 @@ export const useChatStore = defineStore("chatRuntime", () => {
                 const cur = arts.current?.path;
                 const stale = !!cur && !cur.replace(/\\/g, "/").includes(`/conversations/${cid}/`);
                 if (app.currentConvId === cid && (!cur || cur === path || stale)) {
-                  app.drawerCollapsed = false;
                   void arts.open(path);
                 }
               } catch {

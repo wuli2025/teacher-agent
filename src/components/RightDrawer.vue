@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, defineAsyncComponent } from "vue";
+import { ref, computed, watch, defineAsyncComponent } from "vue";
 import { marked } from "marked";
 import { sanitizeHtml } from "../lib/sanitize";
 import { parseSpecLoose, setSpecText, applySlideOp, type SlideOp } from "../lib/slidesSpec";
@@ -11,7 +11,6 @@ import DeckViewer from "./DeckViewer.vue";
 const deckViewerRef = ref<InstanceType<typeof DeckViewer> | null>(null);
 import {
   X,
-  RefreshCw,
   FolderOpen,
   Download,
   Unlock,
@@ -25,15 +24,7 @@ import {
   File as FileIcon,
   Image as ImageIcon,
   Loader,
-  Plus,
-  EllipsisVertical,
   PencilLine,
-  Trash2,
-  CornerDownLeft,
-  Workflow,
-  PanelRightClose,
-  PanelRightOpen,
-  Rocket,
   Play,
   Square,
   RotateCw,
@@ -45,30 +36,15 @@ import {
 const ArtifactEditor = defineAsyncComponent(() => import("./ArtifactEditor.vue"));
 import { useAppStore } from "../stores/app";
 import { useArtifactsStore } from "../stores/artifacts";
-import { useWorkflowsStore, type WorkflowPack } from "../stores/workflows";
 import { useProjectsStore } from "../stores/projects";
 import { useChatStore } from "../stores/chat";
-import {
-  artifacts as artifactsApi,
-  isTauri,
-  type ArtifactEntry,
-  type ProjectInfo,
-} from "../tauri";
+import { artifacts as artifactsApi, isTauri } from "../tauri";
 
 const app = useAppStore();
 const artifacts = useArtifactsStore();
-const workflows = useWorkflowsStore();
 const projects = useProjectsStore();
 const chat = useChatStore();
-const activeTab = ref<"artifacts" | "ref" | "project" | "workflow">("artifacts");
 
-// ───── 可运行项目：列表 + 一键运行 ─────
-async function loadProjects() {
-  await projects.refresh(app.currentConvId ?? undefined);
-}
-function onRunProject(p: ProjectInfo) {
-  projects.run(p);
-}
 function onStopActive() {
   if (!projects.activeRoot) return;
   // 停止=杀整个进程树,误点不可恢复,二次确认
@@ -79,104 +55,6 @@ function onStopActive() {
 function onOpenPreviewExternal() {
   // 用系统默认浏览器打开运行中的应用（artifact_open_external 对 URL 同样适用）
   if (projects.previewUrl) artifactsApi.openExternal(projects.previewUrl);
-}
-
-// ───── 工作流包：三点菜单 + 使用 ─────
-const wfMenuOpen = ref<string | null>(null);
-function toggleWfMenu(id: string) {
-  wfMenuOpen.value = wfMenuOpen.value === id ? null : id;
-}
-function closeWfMenu() {
-  wfMenuOpen.value = null;
-}
-function onUsePack(p: WorkflowPack) {
-  closeWfMenu();
-  workflows.usePack(p);
-  app.setView("chat"); // 切到对话，让提示词落进输入框
-}
-function onEditPack(p: WorkflowPack) {
-  closeWfMenu();
-  workflows.openEdit(p);
-}
-function onDeletePack(p: WorkflowPack) {
-  closeWfMenu();
-  if (confirm(`删除工作流包「${p.name}」？此操作不可撤销。`)) {
-    workflows.removePack(p.id);
-  }
-}
-onMounted(() => window.addEventListener("click", closeWfMenu));
-onBeforeUnmount(() => window.removeEventListener("click", closeWfMenu));
-
-// ───── 参考资料：本对话产物文件夹（按时间倒序，点开即在本栏预览） ─────
-const refFiles = ref<ArtifactEntry[]>([]);
-const refLoading = ref(false);
-// 当前预览文件路径（避免在 v-else 分支里直接读 artifacts.current 被模板收窄成 never）
-const currentPath = computed(() => artifacts.current?.path ?? null);
-
-async function loadRefFiles() {
-  refLoading.value = true;
-  try {
-    refFiles.value = await artifactsApi.list(app.currentConvId ?? undefined);
-  } catch {
-    refFiles.value = [];
-  } finally {
-    refLoading.value = false;
-  }
-}
-
-// 切到「参考资料」tab 或换对话时刷新
-watch(
-  () => [activeTab.value, app.currentConvId] as const,
-  ([tab]) => {
-    if (tab === "ref") loadRefFiles();
-    if (tab === "project") loadProjects();
-  },
-  { immediate: true }
-);
-// 切对话时, 后台静默刷新一次项目列表 (即使没停在「项目」tab), 让 tab 计数及时反映新项目
-watch(
-  () => app.currentConvId,
-  () => loadProjects()
-);
-// 本对话一轮回复刚结束 (sending: true→false): 模型可能刚打包好一个新项目, 静默刷新列表,
-// 让「项目」tab 立刻出现可点「运行」的卡片 —— 用户无需手动刷新。
-watch(
-  () => chat.isSending(app.currentConvId ?? null),
-  (now, prev) => {
-    if (prev && !now) {
-      loadProjects();
-      if (activeTab.value === "ref") loadRefFiles();
-    }
-  }
-);
-// 预览关闭后回到抽屉时，若停在参考资料则刷新一次（可能刚生成新文件）
-watch(
-  () => artifacts.current,
-  (cur) => {
-    if (!cur && activeTab.value === "ref") loadRefFiles();
-  }
-);
-
-function iconFor(kind: string) {
-  if (kind === "html" || kind === "svg") return FileCode;
-  if (kind === "image") return ImageIcon;
-  if (kind === "markdown" || kind === "text") return FileText;
-  return FileIcon;
-}
-
-function fmtTime(unixSec: number): string {
-  if (!unixSec) return "";
-  const d = new Date(unixSec * 1000);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const today = new Date();
-  const sameDay =
-    d.getFullYear() === today.getFullYear() &&
-    d.getMonth() === today.getMonth() &&
-    d.getDate() === today.getDate();
-  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  return sameDay
-    ? `今天 ${hm}`
-    : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
 }
 
 // HTML / SVG（网页 PPT / 网页）走可视化编辑器；Markdown / 纯文本走文档编辑（源码+实时预览）
@@ -425,6 +303,27 @@ watch(
     }
   }
 );
+// ── 生成 PPT 时自动收起左侧侧栏 ──
+// 课件开始流式生成(右抽屉进播放器实时点亮)那一刻,横向空间全该让给舞台。
+// 只在「本来是展开的」时收起,并在这份 PPT 预览关掉后恢复 —— 用户自己收着的不去动。
+const sidebarAutoHidden = ref(false);
+watch(
+  () => deckGenerating.value && !!deckCandidatePath.value,
+  (on) => {
+    if (on && !app.sidebarCollapsed) {
+      sidebarAutoHidden.value = true;
+      app.sidebarCollapsed = true;
+    }
+  },
+  { immediate: true }
+);
+watch(deckCandidatePath, (p) => {
+  if (!p && sidebarAutoHidden.value) {
+    sidebarAutoHidden.value = false;
+    app.sidebarCollapsed = false;
+  }
+});
+
 // 所有对 spec 的改动共用一个事务(与演示工坊同一个 composable):
 // 读盘 → 改对象 → 写盘 → 刷预览 → 重转 pptx,并自动记撤销栈。
 const specEdit = useSpecEdit({
@@ -504,7 +403,7 @@ function fmtSize(n: number): string {
     ref="drEl"
     class="dr"
     :class="{
-      collapsed: app.drawerCollapsed && !artifacts.current && !projects.activeRoot,
+      collapsed: !artifacts.current && !projects.activeRoot,
       preview: !!artifacts.current || !!projects.activeRoot,
       resizing: drDragging,
     }"
@@ -686,33 +585,44 @@ function fmtSize(n: number): string {
                必须排在 text/binary 分支前:spec 是 kind=text、原生 pptx 是 kind=binary。 -->
           <div v-if="deckSpec" class="pv-deck">
             <div v-if="deckError" class="pv-deck-err">{{ deckError }}</div>
+            <!-- 状态文案在左,动作按钮全部靠右(pv-deck-acts 吃掉中间空白) -->
             <div class="pv-deck-bar">
-              <button
-                v-if="!deckGenerating"
-                class="pv-deck-edit"
-                :class="{ on: deckViewerRef?.freeEdit }"
-                :title="deckViewerRef?.curIsFreeform ? '元素级编辑：拖拽移动 / 拉手柄缩放 / 双击文本改字' : '把本页解锁成自由版式后可拖拽元素（不可逆）'"
-                @click="deckViewerRef?.toggleFreeEdit()"
-              >
-                <component :is="deckViewerRef?.curIsFreeform ? MousePointer2 : Unlock" :size="13" :stroke-width="1.8" />
-                <span>{{ deckViewerRef?.freeEdit ? "完成编辑" : "编辑" }}</span>
-              </button>
-              <button
-                class="pv-deck-export"
-                :disabled="deckExporting || deckGenerating"
-                :title="deckGenerating ? '生成完成后可导出' : '无条件重转并在文件夹中定位'"
-                @click="exportDeckPptx()"
-              >
-                <Loader v-if="deckExporting" :size="13" :stroke-width="1.8" class="spin" />
-                <Download v-else :size="13" :stroke-width="1.8" />
-                <span>{{ deckExporting ? "导出中…" : "导出 PPTX" }}</span>
-              </button>
               <span v-if="deckGenerating" class="pv-deck-live">
                 <Loader :size="12" :stroke-width="1.8" class="spin" /> 生成中 · 已出 {{ deckPages }} 页
               </span>
               <!-- 导出回执:明说存成了哪个文件 —— 否则用户以为「没保存」(真踩过) -->
               <span v-else-if="deckExported" class="pv-deck-ok">已保存到 {{ deckExported }}</span>
               <span v-else class="pv-deck-hint">原生可编辑 · 预览即导出</span>
+              <div class="pv-deck-acts">
+                <button
+                  class="pv-deck-edit"
+                  :disabled="!deckPages"
+                  title="全屏放映（F5 · Esc 退出）"
+                  @click="deckViewerRef?.present()"
+                >
+                  <Play :size="13" :stroke-width="1.8" />
+                  <span>放映</span>
+                </button>
+                <button
+                  v-if="!deckGenerating && !deckViewerRef?.curIsFreeform"
+                  class="pv-deck-edit"
+                  title="把本页解锁成自由版式：元素可拖拽/缩放（不可逆）。改文字不用解锁，点了就能改"
+                  @click="deckViewerRef?.toggleFreeEdit()"
+                >
+                  <Unlock :size="13" :stroke-width="1.8" />
+                  <span>解锁拖拽</span>
+                </button>
+                <button
+                  class="pv-deck-export"
+                  :disabled="deckExporting || deckGenerating"
+                  :title="deckGenerating ? '生成完成后可导出' : '无条件重转并在文件夹中定位'"
+                  @click="exportDeckPptx()"
+                >
+                  <Loader v-if="deckExporting" :size="13" :stroke-width="1.8" class="spin" />
+                  <Download v-else :size="13" :stroke-width="1.8" />
+                  <span>{{ deckExporting ? "导出中…" : "导出 PPTX" }}</span>
+                </button>
+              </div>
             </div>
             <DeckViewer
               ref="deckViewerRef"
@@ -780,210 +690,7 @@ function fmtSize(n: number): string {
       </div>
     </template>
 
-    <!-- ───────── 默认抽屉模式 ───────── -->
-    <template v-else>
-      <div v-if="!app.drawerCollapsed" class="dh">
-        <span class="title">文件抽屉</span>
-        <button
-          class="dh-btn"
-          title="收起抽屉 (Ctrl+])"
-          @click="app.toggleDrawer()"
-        >
-          <PanelRightClose :size="16" :stroke-width="1.7" />
-        </button>
-      </div>
-      <!-- 收起后右抽屉整列 0 宽、完全不渲染，右侧边彻底消失（不再留导轨小框）。
-           重新展开：点对话顶栏的抽屉按钮，或生成产物时自动弹出。 -->
-      <template v-if="!app.drawerCollapsed">
-        <div class="tabs">
-          <button
-            v-for="t in [
-              { k: 'artifacts', l: '输出产物' },
-              { k: 'ref', l: '参考资料' },
-              { k: 'project', l: '项目' },
-              { k: 'workflow', l: '工作流包' },
-            ]"
-            :key="t.k"
-            class="tab"
-            :class="{ active: activeTab === t.k }"
-            @click="activeTab = t.k as any"
-          >
-            {{ t.l }}
-          </button>
-        </div>
-        <div class="body">
-          <!-- 参考资料：本对话产物文件夹（时间倒序，点开即预览） -->
-          <template v-if="activeTab === 'ref'">
-            <div class="ref-head">
-              <span class="ref-count">本对话 · {{ refFiles.length }} 个文件</span>
-              <button class="dh-btn" title="刷新" @click="loadRefFiles">
-                <RefreshCw :size="13" :stroke-width="1.8" />
-              </button>
-            </div>
-            <div v-if="refLoading" class="ref-loading">
-              <Loader :size="18" :stroke-width="1.6" class="spin" />
-            </div>
-            <ul v-else-if="refFiles.length" class="ref-list">
-              <li
-                v-for="f in refFiles"
-                :key="f.path"
-                class="ref-item"
-                :class="{ active: currentPath === f.path }"
-                :title="f.path"
-                @click="artifacts.open(f.path)"
-              >
-                <component
-                  :is="iconFor(f.kind)"
-                  :size="16"
-                  :stroke-width="1.7"
-                  class="ref-ic"
-                />
-                <div class="ref-meta">
-                  <div class="ref-name">{{ f.name }}</div>
-                  <div class="ref-sub">
-                    {{ fmtTime(f.modified) }} · {{ fmtSize(f.size) }}
-                  </div>
-                </div>
-              </li>
-            </ul>
-            <div v-else class="empty">
-              <div class="empty-glyph">▦</div>
-              <div class="empty-text">
-                本对话还没有产出文件。<br />
-                生成 HTML / 报告 / PPT 等成品后,会按时间出现在这里,点开即预览。
-              </div>
-            </div>
-          </template>
-
-          <!-- 可运行项目：模型打包好的前后端，点「运行」一键启动并内嵌预览 -->
-          <template v-else-if="activeTab === 'project'">
-            <div class="ref-head">
-              <span class="ref-count">本对话 · {{ projects.list.length }} 个项目</span>
-              <button class="dh-btn" title="刷新" @click="loadProjects">
-                <RefreshCw :size="13" :stroke-width="1.8" />
-              </button>
-            </div>
-            <div v-if="projects.loading" class="ref-loading">
-              <Loader :size="18" :stroke-width="1.6" class="spin" />
-            </div>
-            <ul v-else-if="projects.list.length" class="pj-list">
-              <li v-for="p in projects.list" :key="p.root" class="pj-card">
-                <div class="pj-card-main">
-                  <div class="pj-card-name">
-                    <Boxes :size="15" :stroke-width="1.7" class="pj-card-ic" />
-                    <span>{{ p.name }}</span>
-                    <span v-if="p.running" class="pj-dot" title="运行中" />
-                  </div>
-                  <div class="pj-card-svcs" :title="p.services.join(' · ')">
-                    {{ p.services.length }} 个服务<template v-if="p.services.length">
-                      · {{ p.services.join(" · ") }}</template
-                    >
-                  </div>
-                </div>
-                <button
-                  class="pj-run"
-                  :class="{ running: p.running }"
-                  @click="onRunProject(p)"
-                >
-                  <component
-                    :is="p.running ? Play : Rocket"
-                    :size="13"
-                    :stroke-width="2"
-                  />
-                  <span>{{ p.running ? "查看" : "运行" }}</span>
-                </button>
-              </li>
-            </ul>
-            <div v-else class="empty">
-              <div class="empty-glyph">◳</div>
-              <div class="empty-text">
-                本对话还没有可运行的项目。<br />
-                让我生成一个「能跑起来的应用」(前端 + 后端)后,会打包成项目出现在这里,点「运行」即可一键启动并内嵌预览。
-              </div>
-            </div>
-          </template>
-
-          <!-- 工作流包：结构化提示词库（创建 / 使用 / 修改 / 删除） -->
-          <template v-else-if="activeTab === 'workflow'">
-            <div class="wf-head">
-              <span class="wf-count">{{ workflows.packs.length }} 个工作流包</span>
-              <button
-                class="wf-create"
-                title="创建工作流包"
-                @click="workflows.openCreate()"
-              >
-                <Plus :size="13" :stroke-width="2.2" />
-                <span>创建</span>
-              </button>
-            </div>
-
-            <ul v-if="workflows.packs.length" class="wf-list">
-              <li
-                v-for="p in workflows.packs"
-                :key="p.id"
-                class="wf-card"
-                @click="onUsePack(p)"
-              >
-                <span class="wf-bar" :style="{ background: p.color }" />
-                <div class="wf-main">
-                  <div class="wf-name">{{ p.name }}</div>
-                  <div v-if="p.description" class="wf-desc">
-                    {{ p.description }}
-                  </div>
-                  <div class="wf-meta">
-                    <Workflow :size="11" :stroke-width="1.8" />
-                    {{ p.steps.length }} 环节
-                  </div>
-                </div>
-                <div class="wf-actions" @click.stop>
-                  <button class="wf-use" title="填入对话框" @click="onUsePack(p)">
-                    <CornerDownLeft :size="12" :stroke-width="2" />
-                    <span>使用</span>
-                  </button>
-                  <div class="wf-menu-wrap">
-                    <button
-                      class="wf-dots"
-                      title="更多"
-                      @click.stop="toggleWfMenu(p.id)"
-                    >
-                      <EllipsisVertical :size="15" :stroke-width="2" />
-                    </button>
-                    <div v-if="wfMenuOpen === p.id" class="wf-menu" @click.stop>
-                      <button class="wf-mi" @click="onEditPack(p)">
-                        <PencilLine :size="13" :stroke-width="1.8" />
-                        <span>修改</span>
-                      </button>
-                      <button class="wf-mi danger" @click="onDeletePack(p)">
-                        <Trash2 :size="13" :stroke-width="1.8" />
-                        <span>删除</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </li>
-            </ul>
-
-            <div v-else class="empty">
-              <div class="empty-glyph">◈</div>
-              <div class="empty-text">
-                把你常用的提示词存成「工作流包」。<br />
-                点右上「创建」编排好环节,下次点「使用」即可填入对话框。
-              </div>
-            </div>
-          </template>
-
-          <!-- 输出产物占位 -->
-          <div v-else class="empty">
-            <div class="empty-glyph">▤</div>
-            <div class="empty-text">
-              生成 HTML / 报告 / 图片等成品后,会在对话里出现可点击的文件,点开即在此预览
-            </div>
-          </div>
-        </div>
-      </template>
-
-      <!-- 收起后只保留展开按钮，不显示 tab 图标（跟 Codex 一致） -->
-    </template>
+    <!-- 没有任何预览对象时整列 0 宽隐藏(collapsed):右侧只在看成品/PPT/运行项目时出现 -->
   </aside>
 </template>
 
@@ -1146,7 +853,14 @@ function fmtSize(n: number): string {
   opacity: 0.6;
   cursor: default;
 }
-/* 「编辑」是次要动作:描边而非实心,不跟「导出 PPTX」抢主色 */
+/* 动作区靠右:margin-left:auto 吃掉状态文案与按钮之间的全部空白 */
+.pv-deck-acts {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* 「放映」「编辑」是次要动作:描边而非实心,不跟「导出 PPTX」抢主色 */
 .pv-deck-edit {
   display: inline-flex;
   align-items: center;
@@ -1167,6 +881,10 @@ function fmtSize(n: number): string {
   border-color: var(--primary);
   background: var(--primary-soft);
   color: var(--primary-deep);
+}
+.pv-deck-edit:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .pv-deck-hint {
   font-size: 11px;
@@ -1338,327 +1056,7 @@ html[data-theme="aurora-dark"] .pv-img-wrap {
   color: var(--muted);
 }
 
-/* ───────── 默认抽屉样式（原样保留） ───────── */
-.dh {
-  display: flex;
-  align-items: center;
-  padding: 11px 12px;
-  border-bottom: 1px solid var(--border-soft);
-  gap: 6px;
-}
-.title {
-  flex: 1;
-  font-family: var(--serif);
-  font-weight: 600;
-  font-size: 13px;
-}
-.dh-btn {
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s, color 0.15s;
-}
-.dh-btn:hover {
-  background: var(--selection-bg);
-  color: var(--text);
-}
-.dh-btn.rail {
-  margin-top: 4px;
-}
-
-.tabs {
-  display: flex;
-  border-bottom: 1px solid var(--border-soft);
-  padding: 0 12px;
-  gap: 14px;
-  font-size: 12.5px;
-}
-.tab {
-  background: transparent;
-  border: none;
-  padding: 10px 0;
-  color: var(--muted);
-}
-.tab.active {
-  color: var(--text);
-  font-weight: 600;
-  border-bottom: 2px solid var(--ink);
-  margin-bottom: -1px;
-}
-
-.body {
-  flex: 1;
-  overflow-y: auto;
-}
-.empty {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--dim);
-  font-size: 12.5px;
-  text-align: center;
-  padding: 40px 20px;
-  font-family: var(--serif);
-  letter-spacing: 1px;
-}
-.empty-glyph {
-  font-size: 28px;
-  color: var(--border-strong);
-  margin-bottom: 12px;
-}
-
-/* ───────── 参考资料文件夹视图 ───────── */
-.ref-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-soft);
-}
-.ref-count {
-  font-size: 11.5px;
-  color: var(--muted);
-  letter-spacing: 0.3px;
-}
-.ref-loading {
-  display: flex;
-  justify-content: center;
-  padding: 30px;
-  color: var(--muted);
-}
-.ref-list {
-  list-style: none;
-  margin: 0;
-  padding: 6px;
-}
-.ref-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-.ref-item:hover {
-  background: var(--bg-soft);
-}
-.ref-item.active {
-  background: var(--primary-soft);
-  border-color: var(--primary);
-}
-.ref-ic {
-  color: var(--primary);
-  flex-shrink: 0;
-}
-.ref-meta {
-  min-width: 0;
-  flex: 1;
-}
-.ref-name {
-  font-size: 12.5px;
-  color: var(--text);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ref-sub {
-  font-size: 11px;
-  color: var(--muted);
-  margin-top: 1px;
-}
-
-/* ───────── 工作流包 ───────── */
-.wf-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-soft);
-}
-.wf-count {
-  font-size: 11.5px;
-  color: var(--muted);
-  letter-spacing: 0.3px;
-}
-.wf-create {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--panel);
-  color: var(--text-2);
-  font-size: 12px;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
-}
-.wf-create:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: var(--primary-soft);
-}
-.wf-list {
-  list-style: none;
-  margin: 0;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.wf-card {
-  position: relative;
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-  padding: 10px 10px 10px 0;
-  background: var(--panel);
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  cursor: pointer;
-  overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
-}
-.wf-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow);
-}
-.wf-card:hover .wf-use {
-  opacity: 1;
-}
-.wf-bar {
-  flex-shrink: 0;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-}
-.wf-main {
-  flex: 1;
-  min-width: 0;
-  padding-left: 2px;
-}
-.wf-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wf-desc {
-  font-size: 11.5px;
-  color: var(--muted);
-  margin-top: 2px;
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.wf-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 6px;
-  font-size: 11px;
-  color: var(--dim);
-}
-.wf-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding-right: 8px;
-  flex-shrink: 0;
-}
-.wf-use {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border: 1px solid var(--primary);
-  border-radius: 7px;
-  background: var(--primary-soft);
-  color: var(--primary-deep);
-  font-size: 11.5px;
-  font-weight: 500;
-  opacity: 0.85;
-  transition: opacity 0.15s, background 0.15s;
-}
-.wf-use:hover {
-  background: var(--primary);
-  color: #fff;
-}
-.wf-menu-wrap {
-  position: relative;
-}
-.wf-dots {
-  width: 26px;
-  height: 26px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.wf-dots:hover {
-  background: var(--selection-bg);
-  color: var(--text);
-}
-.wf-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 30;
-  min-width: 116px;
-  padding: 5px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  box-shadow: var(--shadow-lg);
-  animation: wf-pop 130ms ease;
-}
-@keyframes wf-pop {
-  from {
-    opacity: 0;
-    transform: translateY(-3px);
-  }
-}
-.wf-mi {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 10px;
-  border: none;
-  background: transparent;
-  color: var(--text-2);
-  font-size: 12.5px;
-  border-radius: 6px;
-  text-align: left;
-}
-.wf-mi:hover {
-  background: var(--bg-soft);
-  color: var(--text);
-}
-.wf-mi.danger {
-  color: var(--vermilion);
-}
-.wf-mi.danger:hover {
-  background: var(--vermilion-soft);
-}
-
-/* ───────── 可运行项目 ───────── */
+/* ───────── 运行中项目预览 ───────── */
 .pv-btn.danger:hover {
   background: var(--vermilion-soft);
   color: var(--vermilion);

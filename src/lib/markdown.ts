@@ -96,8 +96,15 @@ export function renderMarkdown(text: string, opts?: RenderOpts): string {
   if (opts?.enhance === false) return renderMarkdownStreaming(key);
   const html = sanitizeHtml(marked.parse(mathPlaceholders(key)) as string);
   if (cache.size >= CACHE_CAP) {
-    cache.clear();
-    enhanceQueued.clear();
+    // 淘汰最旧 1/8 而不是整体 clear():旧做法在缓存打满的瞬间让所有可见回合同帧
+    // 全量重 parse(长对话滚动时一次可感的卡顿尖峰);FIFO 淘汰只丢最老的历史回合,
+    // 它们要等用户翻回去才需要重 parse,代价被摊平。
+    let n = CACHE_CAP >> 3;
+    for (const k of cache.keys()) {
+      if (n-- <= 0) break;
+      cache.delete(k);
+      enhanceQueued.delete(k);
+    }
   }
   cache.set(key, html);
   scheduleEnhance(key, html); // 走到这里必是定稿路径(enhance=false 已在上面分流)
@@ -111,7 +118,7 @@ export function renderMarkdown(text: string, opts?: RenderOpts): string {
 // 稳定前缀(多数帧不变,按前缀字符串独立小缓存命中)+ 活跃尾巴(永远很短,每帧 parse)。
 // 中间产物一律不写全局 LRU。定稿后走完整路径,最终 HTML 与旧路径逐字一致。
 const streamPrefixCache = new Map<string, string>();
-const STREAM_CACHE_CAP = 32; // 多个对话并发流式也够用;满了整清,代价只是重 parse 一次前缀
+const STREAM_CACHE_CAP = 32; // 多个对话并发流式也够用;满了 FIFO 挤掉最旧一条
 
 function countOccurrences(s: string, needle: string): number {
   let n = 0;
@@ -166,7 +173,12 @@ function renderMarkdownStreaming(text: string): string {
       head = hit;
     } else {
       head = parseChunk(prefix);
-      if (streamPrefixCache.size >= STREAM_CACHE_CAP) streamPrefixCache.clear();
+      // 只挤掉最旧一条(多为同一条回复更早的短前缀),别整清 —— 整清会让并发流式的
+      // 其它对话下一帧也重 parse 各自前缀
+      if (streamPrefixCache.size >= STREAM_CACHE_CAP) {
+        const oldest = streamPrefixCache.keys().next().value;
+        if (oldest !== undefined) streamPrefixCache.delete(oldest);
+      }
       streamPrefixCache.set(prefix, head);
     }
   }

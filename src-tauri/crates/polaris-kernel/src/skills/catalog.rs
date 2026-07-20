@@ -30,6 +30,47 @@ pub(crate) fn catalog() -> Vec<CatalogSkill> {
             preinstalled: true,
             system_prompt: DECK_SKILL_MD,
         },
+        // ── GitHub 高星教师适用技能（anthropics/skills 官方文档四件套 + humanizer） ──
+        CatalogSkill {
+            id: "docx",
+            name: "Word 文档（教案 / 试卷 / 公文）",
+            description: "创建、编辑、读取 Word 文档(.docx)：教案、试卷、通知、家长信等，支持目录/页眉页脚/表格/图片/修订批注。来自 Anthropic 官方 skills 仓库",
+            source: "official",
+            preinstalled: false,
+            system_prompt: include_str!("../../../../src/templates/skills/gh-docx.md"),
+        },
+        CatalogSkill {
+            id: "xlsx",
+            name: "Excel 表格（成绩册 / 统计分析）",
+            description: "创建、编辑、分析 Excel 表格(.xlsx)：成绩册、班级名单、量化考核表，支持公式/图表/数据透视。来自 Anthropic 官方 skills 仓库",
+            source: "official",
+            preinstalled: false,
+            system_prompt: include_str!("../../../../src/templates/skills/gh-xlsx.md"),
+        },
+        CatalogSkill {
+            id: "pdf",
+            name: "PDF 处理（试卷 / 资料）",
+            description: "处理 PDF 文件：提取试卷/教材内容、合并拆分、填表单、生成新 PDF。来自 Anthropic 官方 skills 仓库",
+            source: "official",
+            preinstalled: false,
+            system_prompt: include_str!("../../../../src/templates/skills/gh-pdf.md"),
+        },
+        CatalogSkill {
+            id: "doc-coauthoring",
+            name: "文档共创（论文 / 总结 / 汇报）",
+            description: "结构化共同写作流程：厘清目标→搭骨架→逐节共创→整体打磨，适合教学总结、课题申报、评职称材料等重要文档。来自 Anthropic 官方 skills 仓库",
+            source: "official",
+            preinstalled: false,
+            system_prompt: include_str!("../../../../src/templates/skills/gh-doc-coauthoring.md"),
+        },
+        CatalogSkill {
+            id: "humanizer",
+            name: "去 AI 味润色",
+            description: "按维基百科「AI 写作痕迹」清单逐条检测并改写：去掉套话、排比堆砌、空洞总结等 AI 腔，让教案、评语、公开文稿读起来像真人写的。GitHub 高星开源技能(blader/humanizer, MIT)",
+            source: "third-party",
+            preinstalled: false,
+            system_prompt: include_str!("../../../../src/templates/skills/gh-humanizer.md"),
+        },
         // ── 自媒体全链路运营（交互决策版，与「自动化」里的两条流程同源） ──
         CatalogSkill {
             id: "wechat-pipeline",
@@ -126,9 +167,10 @@ pub(crate) fn find_catalog(id: &str) -> Option<CatalogSkill> {
 pub(crate) fn skill_category(id: &str) -> &'static str {
     match id {
         // 办公文档
-        "polaris-deck-studio" | "pdf" | "xlsx" | "pptx" | "deep-research" | "web-search" => {
-            "办公文档"
-        }
+        "polaris-deck-studio" | "pdf" | "xlsx" | "docx" | "doc-coauthoring" | "pptx"
+        | "deep-research" | "web-search" => "办公文档",
+        // 教学教研
+        "humanizer" => "教学教研",
         // 财务会计
         "financial-model" | "invoice-audit" | "bookkeeping-recon" => "财务会计",
         // 开发编程

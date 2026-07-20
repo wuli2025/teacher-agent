@@ -42,8 +42,6 @@ export const useAppStore = defineStore("app", () => {
     view.value = "home";
   }
   const sidebarCollapsed = ref(false);
-  // 右抽屉(成品预览)默认收起 → 把横向空间让给主区;点对话里的成品 chip 或顶栏抽屉按钮即展开
-  const drawerCollapsed = ref(true);
 
   // 置顶对话：仅前端持久化（localStorage），侧栏排序时置顶优先
   const PINNED_KEY = "polaris.pinnedConvs.v1";
@@ -165,9 +163,6 @@ export const useAppStore = defineStore("app", () => {
   function toggleSidebar() {
     sidebarCollapsed.value = !sidebarCollapsed.value;
   }
-  function toggleDrawer() {
-    drawerCollapsed.value = !drawerCollapsed.value;
-  }
 
   // 侧栏宽度可拖拽调节(200–420px),记住选择
   const SIDEBAR_W_KEY = "polaris.sidebarWidth.v1";
@@ -185,8 +180,9 @@ export const useAppStore = defineStore("app", () => {
       /* storage 不可用 */
     }
   }
+  // 收起 = 整列 0 宽彻底消失(豆包式),由主区左上角的浮动小按钮负责再展开
   const sidebarWidth = computed(() =>
-    sidebarCollapsed.value ? 48 : sidebarUserWidth.value
+    sidebarCollapsed.value ? 0 : sidebarUserWidth.value
   );
   // ── 右抽屉宽度可拖拽调节（WorkBuddy 式收缩框）──
   // 三种形态各记各的宽：默认抽屉 / 成品预览 / 放大编辑。拖一次就记住，
@@ -240,10 +236,6 @@ export const useAppStore = defineStore("app", () => {
       /* storage 不可用 */
     }
   }
-  // 收起后右抽屉完全消失（0 宽，不留小框/导轨）；需要时点对话顶栏的抽屉按钮或生成产物自动展开
-  const drawerWidth = computed(() =>
-    drawerCollapsed.value ? 0 : drawerWidths.value.default ?? 300
-  );
 
   async function refreshProjects() {
     try {
@@ -482,10 +474,8 @@ export const useAppStore = defineStore("app", () => {
     homeMode,
     setHomeMode,
     sidebarCollapsed,
-    drawerCollapsed,
     sidebarWidth,
     setSidebarWidth,
-    drawerWidth,
     drawerWidths,
     drawerResizing,
     setDrawerWidth,
@@ -496,7 +486,6 @@ export const useAppStore = defineStore("app", () => {
     pendingSummon,
     requestSummon,
     toggleSidebar,
-    toggleDrawer,
     unreadConvs,
     markUnread,
     clearUnread,

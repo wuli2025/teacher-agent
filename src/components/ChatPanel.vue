@@ -5,6 +5,7 @@ import {
   Puzzle,
   ChevronDown,
   ChevronRight,
+  Presentation,
   X,
   ArrowRight,
   Square,
@@ -31,8 +32,7 @@ import {
   Trash2,
   Check,
   Workflow,
-  PanelRightOpen,
-  PanelRightClose,
+  Loader,
   BookOpen,
   Layers,
   Hand,
@@ -126,13 +126,18 @@ function openArtifact(path: string) {
     artifactsStore.openFolder(path);
     return;
   }
-  app.drawerCollapsed = false;
   artifactsStore.open(path);
 }
 
 /** 豆包式「参考文件」: 本回合 Read 过的文件, 去重、剔除本回合产物与被截断的摘要,
  *  收在回答最前面供点开预览(走 openArtifact 同一条右侧抽屉链路) */
+// 按 Turn 对象记忆化:模板一帧内会调它 3 次,且流式时全部可见回合每帧重渲染。
+// 前缀回合对象跨帧复用(renderTurns 前缀缓存)→ 常驻命中;活跃末回合每帧是新对象 →
+// 每帧只算 1 次而不是 3 次。WeakMap 随旧 Turn 被 GC 自动清,零管理成本。
+const refFilesMemo = new WeakMap<Turn, string[]>();
 function refFiles(t: Turn): string[] {
+  const hit = refFilesMemo.get(t);
+  if (hit) return hit;
   const arts = new Set(t.artifacts);
   const seen = new Set<string>();
   const out: string[] = [];
@@ -147,7 +152,60 @@ function refFiles(t: Turn): string[] {
       out.push(p);
     }
   }
-  return out.slice(0, 8);
+  const res = out.slice(0, 8);
+  refFilesMemo.set(t, res);
+  return res;
+}
+
+// ── PPT 成品卡(豆包式) ──
+// 回合产物里有 polaris.slides.json / .pptx 时,不再让它们混在产物文件行里,
+// 而是渲染成一张醒目的「演示文稿卡」:标题 + 创建时间,整卡可点,点开右侧即是
+// 播放器,再点「编辑」就能改 —— 这就是「卡片一样打开就能编辑」的入口。
+// 点开目标优先 spec(播放器按它渲染,预览即导出);标题优先 pptx 文件名。
+interface DeckCardInfo {
+  open: string;
+  title: string;
+}
+const deckCardMemo = new WeakMap<Turn, DeckCardInfo | null>();
+function deckCard(t: Turn): DeckCardInfo | null {
+  if (deckCardMemo.has(t)) return deckCardMemo.get(t) ?? null;
+  let spec: string | null = null;
+  let pptx: string | null = null;
+  for (const a of t.artifacts) {
+    const n = fileName(a).toLowerCase();
+    if (n === "polaris.slides.json") spec = a;
+    else if (n.endsWith(".pptx")) pptx = a;
+  }
+  const open = spec ?? pptx;
+  const card: DeckCardInfo | null = open
+    ? {
+        open,
+        title: pptx
+          ? fileName(pptx).replace(/\.pptx$/i, "")
+          : app.convTitle(app.currentConvId) || "演示文稿",
+      }
+    : null;
+  deckCardMemo.set(t, card);
+  return card;
+}
+function openDeckCard(t: Turn) {
+  const c = deckCard(t);
+  if (c) openArtifact(c.open);
+}
+// 产物文件夹只装「PPT 卡之外」的文件,避免同一份课件双入口
+const otherArtsMemo = new WeakMap<Turn, string[]>();
+function otherArtifacts(t: Turn): string[] {
+  const hit = otherArtsMemo.get(t);
+  if (hit) return hit;
+  let res = t.artifacts;
+  if (deckCard(t)) {
+    res = t.artifacts.filter((a) => {
+      const n = fileName(a).toLowerCase();
+      return n !== "polaris.slides.json" && !n.endsWith(".pptx");
+    });
+  }
+  otherArtsMemo.set(t, res);
+  return res;
 }
 
 // 产物文件夹卡片的折叠态(按回合 key, 默认展开; 只在会话内存活, 不持久化)
@@ -177,22 +235,47 @@ const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 // 系统提示词约定长回答第一行写 `TL;DR: 一句话结论`(见后端 reply_style_directive),
 // 这里把它从正文里摘出来渲染成置顶速览卡, 正文从第二段起正常走 markdown 管线。
 const TLDR_RE = /^\s*(?:>\s*)?(?:\*\*)?\s*TL;?\s?DR\s*(?:\*\*)?\s*[::]\s*(.+?)\s*$/i;
+// 定稿回合的最终 HTML 按原文记忆化:底层 renderMarkdown 虽有 LRU,但这层的
+// ANSI 清洗 + TLDR 摘取 + 字符串切拼在流式期间是「每个可见回合 × 每帧(~25fps)」
+// 地白跑。命中后一次 Map 查找直接返回。mdVersion(异步高亮/公式落地)变化时整层
+// 失效重建,拿到增强后的 HTML。流式中的活跃回合(enhance=false)文本每帧都在变,
+// 不进这层缓存 —— 由底层「稳定前缀+活跃尾巴」增量路径兜着。
+const MD_MEMO_CAP = 160; // ≳ 最大可见回合数(30)的 5 倍,盖住「加载更早」几轮
+const mdMemo = new Map<string, string>();
+let mdMemoVer = -1;
 function renderMd(text: string, enhance = true): string {
-  void mdVersion.value; // 注册响应式依赖:增强完成后刷新
+  const ver = mdVersion.value; // 注册响应式依赖:增强完成后刷新
+  if (ver !== mdMemoVer) {
+    mdMemo.clear();
+    mdMemoVer = ver;
+  }
+  if (enhance) {
+    const hit = mdMemo.get(text);
+    if (hit !== undefined) return hit;
+  }
   const clean = (text || "").replace(ANSI_RE, "");
   const nl = clean.indexOf("\n");
   const firstLine = nl >= 0 ? clean.slice(0, nl) : clean;
   const m = firstLine.match(TLDR_RE);
+  let html: string;
   if (m) {
     const rest = nl >= 0 ? clean.slice(nl + 1).replace(/^\s*\n/, "") : "";
-    return (
+    html =
       `<div class="tldr"><span class="tldr-tag">TL;DR</span><div class="tldr-body">` +
       renderMarkdown(m[1], { enhance }) +
       `</div></div>` +
-      (rest ? renderMarkdown(rest, { enhance }) : "")
-    );
+      (rest ? renderMarkdown(rest, { enhance }) : "");
+  } else {
+    html = renderMarkdown(clean, { enhance });
   }
-  return renderMarkdown(clean, { enhance });
+  if (enhance) {
+    if (mdMemo.size >= MD_MEMO_CAP) {
+      const oldest = mdMemo.keys().next().value;
+      if (oldest !== undefined) mdMemo.delete(oldest);
+    }
+    mdMemo.set(text, html);
+  }
+  return html;
 }
 
 // 工具名 → 友好中文（对话里以优雅 pill 呈现，不再是终端灰块）
@@ -353,6 +436,18 @@ const renderTurns = computed<Turn[]>(() => {
 });
 function isPending(t: Turn): boolean {
   return sending.value && t === renderTurns.value[renderTurns.value.length - 1];
+}
+// 「正在运行的工具」:本轮仍在生成且最后一个信号是工具调用 → 认为它还没跑完。
+// 长耗时工具(转 PPT/装依赖/跑命令)期间给出具体活动文案 + pill 脉冲,
+// 不再只有底部三点、一副假死相(静默熔断长达 5 分钟,这段必须有活着的信号)。
+const runningToolLabel = computed<string | null>(() => {
+  if (!sending.value) return null;
+  const arr = bubbles.value;
+  const last = arr[arr.length - 1];
+  return last?.role === "tool" ? toolLabel(last.tool || "工具") : null;
+});
+function isRunningTool(t: Turn, j: number): boolean {
+  return isPending(t) && !!runningToolLabel.value && j === t.tools.length - 1;
 }
 
 // ── 历史折叠:长对话只渲染最近 N 回合,顶部「加载更早」逐段放开 ──
@@ -1425,12 +1520,15 @@ watch(
 const tailSig = computed(() => {
   const arr = bubbles.value;
   const last = arr[arr.length - 1];
-  return (
-    arr.length * 1e9 +
-    (last ? last.text.length + (last.artifacts?.length ?? 0) * 7 : 0)
-  );
+  // 字符串元组签名:旧的 `条数*1e9+长度` 数字编码在超长单条时可能与「条数+1」碰撞漏跟
+  return `${arr.length}:${last?.text.length ?? 0}:${last?.artifacts?.length ?? 0}`;
 });
 watch(tailSig, () => {
+  if (atBottom.value) scrollToBottom();
+});
+// 异步增强(shiki 高亮/KaTeX 公式)落地会把已渲染回合撑高,但不改 tailSig ——
+// 在底部的用户会被内容顶得差一截。增强完成信号(mdVersion)到了就补一次跟底。
+watch(mdVersion, () => {
   if (atBottom.value) scrollToBottom();
 });
 
@@ -1819,17 +1917,6 @@ async function deleteCurrentConv() {
           <span>{{ copied }}</span>
         </div>
       </Transition>
-      <button
-        class="drawer-toggle"
-        :title="app.drawerCollapsed ? '展开文件抽屉' : '收起文件抽屉'"
-        @click="app.toggleDrawer()"
-      >
-        <component
-          :is="app.drawerCollapsed ? PanelRightOpen : PanelRightClose"
-          :size="17"
-          :stroke-width="1.7"
-        />
-      </button>
     </div>
 
     <div class="messages" ref="scrollEl" @scroll.passive="onMessagesScroll">
@@ -1970,10 +2057,16 @@ async function deleteCurrentConv() {
                 :class="{
                   open: expandedTool === `${t.key}:${j}`,
                   clickable: tl.details.length > 0,
+                  running: isRunningTool(t, j),
                 }"
                 @click="tl.details.length && toggleTool(t.key, j)"
               >
-                <Wrench :size="11" :stroke-width="1.8" />
+                <component
+                  :is="isRunningTool(t, j) ? Loader : Wrench"
+                  :size="11"
+                  :stroke-width="1.8"
+                  :class="{ 'tp-spin': isRunningTool(t, j) }"
+                />
                 {{ toolLabel(tl.name) }}
                 <span v-if="tl.count > 1" class="tp-count">×{{ tl.count }}</span>
               </button>
@@ -2007,8 +2100,13 @@ async function deleteCurrentConv() {
           <!-- 正文：markdown 渲染(流式中的活跃回合跳过异步高亮排队) -->
           <div v-if="t.text" class="md" v-html="renderMd(t.text, !isPending(t))"></div>
 
-          <!-- 生成中：三点呼吸 -->
-          <div v-if="isPending(t)" class="typing">
+          <!-- 生成中:有具体工具在跑 → 活动行(正在做什么);否则正文还没出字时才挂
+               三点呼吸 —— 正文已在流式增长时,增长本身就是活着的信号,三点纯冗余 -->
+          <div v-if="isPending(t) && runningToolLabel" class="typing-act">
+            <Loader :size="12" :stroke-width="1.8" class="tp-spin" />
+            <span>正在{{ runningToolLabel }}…</span>
+          </div>
+          <div v-else-if="isPending(t) && !t.text" class="typing">
             <span></span><span></span><span></span>
           </div>
 
@@ -2017,13 +2115,37 @@ async function deleteCurrentConv() {
             {{ e }}
           </div>
 
+          <!-- PPT 成品卡(豆包式):整卡可点,点开右侧即是播放器/编辑器 -->
+          <button
+            v-if="deckCard(t)"
+            class="deck-card"
+            :class="{ active: artifactsStore.current?.path === deckCard(t)?.open }"
+            @click="openDeckCard(t)"
+          >
+            <span class="dc-icon">
+              <Presentation :size="20" :stroke-width="1.7" />
+            </span>
+            <span class="dc-main">
+              <span class="dc-title">{{ deckCard(t)?.title }}</span>
+              <span class="dc-sub">
+                <template v-if="isPending(t)">生成中 · 点击看逐页点亮</template>
+                <template v-else
+                  >创建时间 {{ fmtTime(t.at) }} · 点击打开可编辑</template
+                >
+              </span>
+            </span>
+            <span class="dc-act">
+              <PencilLine :size="14" :stroke-width="1.8" />
+            </span>
+          </button>
+
           <!-- 生成的文件：文件夹卡片统一收在回答末尾, 点文件行在右侧抽屉预览 -->
-          <div v-if="t.artifacts.length" class="files">
+          <div v-if="otherArtifacts(t).length" class="files">
             <div class="folder-card">
               <button class="folder-head" @click="toggleFiles(t.key)">
                 <FolderOpen :size="15" :stroke-width="1.7" class="folder-ico" />
                 <span class="folder-title">本轮产物</span>
-                <span class="folder-count">{{ t.artifacts.length }}</span>
+                <span class="folder-count">{{ otherArtifacts(t).length }}</span>
                 <ChevronDown
                   :size="14"
                   :stroke-width="2"
@@ -2033,7 +2155,7 @@ async function deleteCurrentConv() {
               </button>
               <div v-if="!filesCollapsed[t.key]" class="folder-body">
                 <button
-                  v-for="a in t.artifacts"
+                  v-for="a in otherArtifacts(t)"
                   :key="a"
                   class="file-row"
                   :class="{ active: artifactsStore.current?.path === a }"
@@ -2572,25 +2694,6 @@ async function deleteCurrentConv() {
   font-weight: 400;
   color: var(--muted);
 }
-/* 文件抽屉开关（移到顶栏右侧；收起后右侧整列消失，靠它再展开） */
-.drawer-toggle {
-  width: 30px;
-  height: 30px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
-}
-.drawer-toggle:hover {
-  background: var(--selection-bg);
-  color: var(--text);
-}
-
 /* 已置顶标记（标题前的小别针） */
 .t-pin {
   color: var(--gold);
@@ -3088,6 +3191,32 @@ async function deleteCurrentConv() {
   font-size: 10px;
   color: var(--muted);
 }
+/* 正在运行的工具:pill 亮主色 + 图标自转,长耗时工具期间不再假死 */
+.tool-pill.running {
+  border-color: var(--primary);
+  color: var(--primary-deep);
+  background: var(--primary-soft);
+}
+.tp-spin {
+  animation: tp-spin 0.9s linear infinite;
+}
+@keyframes tp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* 「正在××…」活动行:替代裸三点,告诉用户此刻具体在做什么 */
+.typing-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.typing-act svg {
+  color: var(--primary);
+}
 /* 工具输入摘要(pill 点开) */
 .tool-detail {
   margin: -4px 0 10px;
@@ -3173,6 +3302,72 @@ async function deleteCurrentConv() {
   margin-top: 12px;
   padding-top: 11px;
   border-top: 1px dashed var(--border);
+}
+
+/* ── PPT 成品卡(豆包式):整卡可点,悬停微浮起 ── */
+.deck-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  text-align: left;
+  animation: card-rise 0.35s var(--ease-out) both;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+}
+.deck-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+.deck-card.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.dc-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-deep, #2c4661));
+  box-shadow: var(--shadow-sm);
+}
+.dc-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dc-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dc-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.dc-act {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.deck-card:hover .dc-act {
+  color: var(--primary);
 }
 
 /* 回答下方操作行（复制） —— 平时淡出，悬停回答时浮现 */

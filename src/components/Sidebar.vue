@@ -9,7 +9,6 @@ import {
   Stethoscope,
   Settings,
   PanelLeftClose,
-  PanelLeftOpen,
   Pin,
   MoreHorizontal,
   Archive,
@@ -144,26 +143,16 @@ const sortedConvs = computed<Conversation[]>(() => {
 
 <template>
   <aside class="sb" :class="{ collapsed: app.sidebarCollapsed }">
-    <!-- Head：顶部留白，仅保留收起按钮（品牌 logo/文字已按要求移除） -->
+    <!-- Head：顶部留白，仅保留收起按钮（品牌 logo/文字已按要求移除）。
+         收起后整列 display:none,展开入口在主区左上角的浮动按钮(App.vue)。 -->
     <div class="sb-head">
-      <template v-if="!app.sidebarCollapsed">
-        <button
-          class="collapse-btn push-right"
-          title="收起侧栏"
-          @click="app.toggleSidebar()"
-        >
-          <PanelLeftClose :size="17" :stroke-width="1.7" />
-        </button>
-      </template>
-      <template v-else>
-        <button
-          class="collapse-btn rail"
-          title="展开侧栏"
-          @click="app.toggleSidebar()"
-        >
-          <PanelLeftOpen :size="17" :stroke-width="1.7" />
-        </button>
-      </template>
+      <button
+        class="collapse-btn push-right"
+        title="收起侧栏 (Ctrl+B)"
+        @click="app.toggleSidebar()"
+      >
+        <PanelLeftClose :size="17" :stroke-width="1.7" />
+      </button>
     </div>
 
     <!-- 新建对话（大按钮，仿九章爱学「新建任务」）：回到干净首页开新的一份 -->
@@ -335,8 +324,9 @@ const sortedConvs = computed<Conversation[]>(() => {
   padding: 8px 8px 6px;
   overflow: hidden;
 }
+/* 收起 = 整列彻底消失(列宽同时归 0),不再留 48px 图标导轨 */
 .sb.collapsed {
-  padding: 8px 4px;
+  display: none;
 }
 
 .sb-head {

@@ -28,7 +28,8 @@
   - **讲述提示 → 该页 `notes`**(演讲者备注,投影不显示)。这是课件相对普通 PPT 的核心价值:投影给学生的是骨架,教师看的是备注。别把讲述提示塞进正文。
   - 视觉建议 → 只影响你的版式选择;**不要**写成 spec 字段,引擎不读。
 - 存成 `polaris.slides.json`(文件名固定),再 `polaris-forge spec-pptx --spec=<目录>/polaris.slides.json --out=<目录>/课件.pptx`。CLI 不在就只存 spec,Polaris 会自动转换。
-- 色板:课件优先浅色(`minimal-white`/`warm-paper`/`forest`/`tech-blue`)——教室投影与日光下深色底常糊。
+- ≥8 页时按 SKILL.md 的叙事骨架:封面 → freeform 编号目录页 → 每章前插 `section`(kicker 写章号) → 结尾 `closing`;封面与章节页加 `"transition":{"type":"fade"}`。
+- 色板:课堂课件优先浅色(`minimal-white`/`warm-paper`/`forest`/`tech-blue`)——教室投影与日光下深色底常糊;面向评委/家长会/讲座汇报的场合可用 `midnight-gold` 深色板走发布会气质。
 - 配图:spec 的 `image-full`/`image-text` 版式吃本地图片,用 `polaris-forge image --prompt=<画面描述> --out=<png> --ratio=16:9` 现生;生不出(无 key/断网)就换纯文字版式,不留空图占位。
 - 板书设计图不进 spec,单独以文字交付(黑板是黑板,PPT 是 PPT)。
 
