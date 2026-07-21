@@ -79,14 +79,15 @@ export const useAppStore = defineStore("app", () => {
   // 主题：浅色（默认·暖白水墨）/ 黑夜（深空玻璃，抄自智能选股版）。
   // 挂到 <html data-theme="dark"> 上由 style.css 的 token 覆盖块全局换肤。
   const THEME_KEY = "polaris.theme.v1";
-  // light=软白水墨 / dark=墨黑 / aurora-light=软白+极光画框 / aurora-dark=墨黑+灰画框
-  type Theme = "light" | "dark" | "aurora-light" | "aurora-dark";
+  // light=软白水墨 / dark=墨黑 / eyecare=护眼淡绿 / aurora-light=软白+极光画框 / aurora-dark=墨黑+灰画框
+  type Theme = "light" | "dark" | "eyecare" | "aurora-light" | "aurora-dark";
   function loadTheme(): Theme {
     try {
       const t = localStorage.getItem(THEME_KEY);
       if (
         t === "light" ||
         t === "dark" ||
+        t === "eyecare" ||
         t === "aurora-light" ||
         t === "aurora-dark"
       )
@@ -112,6 +113,7 @@ export const useAppStore = defineStore("app", () => {
       const titlebar: Record<Theme, { caption: string; text: string }> = {
         light: { caption: "#f3f2eb", text: "#1a1a1c" }, // 暖米框面，与侧栏无色差
         dark: { caption: "#1f1f1f", text: "#ececea" }, // 石墨框面
+        eyecare: { caption: "#e8f0e2", text: "#1a1a1c" }, // 护眼淡绿框面，与侧栏无色差
         "aurora-light": { caption: "#eef1fa", text: "#232436" }, // 珠光浅画框
         "aurora-dark": { caption: "#1c1d20", text: "#ececea" }, // 墨黑+灰画框
       };

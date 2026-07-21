@@ -63,17 +63,19 @@ const updToast = ref<UpdToast | null>(null);
 /** 退出确认弹窗(设计稿 §4) */
 const exitAsk = ref(false);
 
-/** 主题分段控件 —— 只映射 app.ts 里**真实存在**的主题,不新造「护眼」皮。
- *  第三段给 aurora-light(极光琉璃软白框),四主题的完整选择仍在 设置 页。 */
+/** 主题分段控件 —— 对齐设计稿设置弹层的三档「浅色/深色/护眼」。
+ *  极光琉璃两套仍在 设置 页完整可选,这里不占分段。 */
 const themeSegs = [
   { key: "light", label: "浅色" },
   { key: "dark", label: "深色" },
-  { key: "aurora-light", label: "极光" },
+  { key: "eyecare", label: "护眼" },
 ] as const;
-/** aurora-dark 没有独立分段:归到「深色」高亮,避免出现一段都不亮的空档 */
-const themeSeg = computed(() =>
-  app.theme === "aurora-dark" ? "dark" : app.theme
-);
+/** 极光两套没有独立分段:按明暗归到「浅色/深色」高亮,避免出现一段都不亮的空档 */
+const themeSeg = computed(() => {
+  if (app.theme === "aurora-dark") return "dark";
+  if (app.theme === "aurora-light") return "light";
+  return app.theme;
+});
 
 function openSettings() {
   const r = acctEl.value?.getBoundingClientRect();

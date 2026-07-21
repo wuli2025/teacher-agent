@@ -241,6 +241,41 @@ html[data-theme="aurora-dark"] ::selection {
 }
 
 /* ============================================================
+   护眼模式 —— 淡绿纸感（设计稿 设置弹层「浅色/深色/护眼」第三档）
+   只调表面/底色 token 成低刺激的淡绿纸色，文字与强调色沿用浅色，
+   对比度不降。挂在 <html data-theme="eyecare"> 上。
+   ============================================================ */
+:root[data-theme="eyecare"] {
+  --bg: #f2f7ee;
+  --bg-soft: #e8f0e2;
+  --panel: #f9fcf5;
+  --panel-hover: #f0f6ea;
+
+  --border: #dbe4d3;
+  --border-soft: #e4ecdd;
+  --border-strong: #c6d3bb;
+
+  --selection-bg: #e3ecdb;
+  --selection-bg-hover: #dae5d1;
+  --active-bg: #dde8d4;
+
+  --chip-bg: #eaf1e4;
+  --code-bg: #ecf2e5;
+
+  --bg-chat: #f2f7ee;
+  --bg-side: #e8f0e2;
+  --bg-side-mid: #e8f0e2;
+
+  --hairline: rgba(40, 60, 35, 0.07);
+  --overlay: rgba(28, 38, 24, 0.35);
+}
+/* 窗底取侧栏同色：外壳圆角外的一圈与染色标题栏融为一体（同黑夜模式的处理） */
+html[data-theme="eyecare"] body,
+html[data-theme="eyecare"] #app {
+  background-color: #e8f0e2;
+}
+
+/* ============================================================
    极光琉璃 · 画框版 —— 两套可选（aurora-light / aurora-dark）
    不再铺满全屏：内容面板保持干净底，只把「画框」(侧栏 + 主面板四周
    的框带 + 面板描边) 做成琉璃质感。

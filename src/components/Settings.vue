@@ -71,13 +71,14 @@ function useDefault() {
   <div class="settings">
     <header class="head">
       <h1>设置</h1>
-      <p class="sub">配置教师助手的外观、语音、软件更新与运行环境。</p>
+      <p class="sub">配置微光的外观、语音、软件更新与运行环境。</p>
     </header>
 
     <section class="block">
       <div class="b-title">外观</div>
       <div class="b-desc">
-        浅色=暖白水墨；黑夜=石墨炭黑；「极光琉璃」两套=内容保持干净、只把
+        浅色=暖白水墨；黑夜=石墨炭黑；护眼=淡绿纸感(低刺激、文字对比不降)；
+        「极光琉璃」两套=内容保持干净、只把
         画框做成琉璃质感:软白画框(浅底+彩虹极光边)、墨黑灰框(深底+中性灰边、不突兀)。
         切换立即生效并记住选择。
       </div>
@@ -103,6 +104,17 @@ function useDefault() {
             <span class="sw-main"><span class="sw-card"></span></span>
           </span>
           <span class="theme-name">黑夜 · 石墨炭黑</span>
+        </button>
+        <button
+          class="theme-card"
+          :class="{ active: app.theme === 'eyecare' }"
+          @click="app.setTheme('eyecare')"
+        >
+          <span class="theme-swatch eyecare-sw">
+            <span class="sw-side"></span>
+            <span class="sw-main"><span class="sw-card"></span></span>
+          </span>
+          <span class="theme-name">护眼 · 淡绿纸感</span>
         </button>
         <button
           class="theme-card"
@@ -442,6 +454,16 @@ function useDefault() {
 .dark-sw .sw-card {
   background: rgba(43, 43, 41, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.eyecare-sw {
+  background: #f2f7ee;
+}
+.eyecare-sw .sw-side {
+  background: #e8f0e2;
+}
+.eyecare-sw .sw-card {
+  background: #f9fcf5;
+  border: 1px solid rgba(150, 172, 132, 0.55);
 }
 /* 极光琉璃·软白画框：内容干净软白，画框(侧栏/四周)透出彩虹极光 */
 .aurora-light-sw {
