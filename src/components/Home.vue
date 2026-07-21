@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount, onMounted } from "vue";
+import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted } from "vue";
 import { Paperclip, Image as ImageIcon, Mic, Send, Search, Loader, Eye, Sparkles, X, ChevronLeft, ChevronRight, Maximize, MonitorPlay } from "@lucide/vue";
 import { useAppStore } from "../stores/app";
 import { useChatStore } from "../stores/chat";
-import { chat as chatApi, artifacts, invoke, listen, isTauri, type AttachedFile } from "../tauri";
+import { chat as chatApi, artifacts, invoke, listen, isTauri, uploadToBackend, type AttachedFile } from "../tauri";
 import { useFileDrop } from "../composables/useFileDrop";
+import { WebVoiceRecorder } from "../lib/webVoice";
+import { humanizeError } from "../lib/humanizeError";
 import { MODES, GRADES, subjectOf, subjectsOf, type Grade, type TeachMode, type TeachSample } from "../lib/teachSamples";
 import { toast } from "../composables/useToast";
 
@@ -47,12 +49,17 @@ const uploads = ref<AttachedFile[]>([]);
 const uploading = ref(false);
 const busy = ref(false);
 
+// 输入框高度随内容自动增长（与 polaris-app / ChatPanel 同一套）：
+// 先归零再按 scrollHeight 撑高，到 CSS max-height 后转为框内滚动。
 function autoGrow() {
   const el = inputEl.value;
   if (!el) return;
   el.style.height = "auto";
-  el.style.height = Math.min(el.scrollHeight, 220) + "px";
+  el.style.height = `${el.scrollHeight}px`;
 }
+// 内容变化（手输 / 语音回填 / 范例填入 / 发送清空）都重算高度
+watch(input, () => nextTick(autoGrow));
+onMounted(() => nextTick(autoGrow));
 
 async function addPaths(paths: string[]) {
   if (!paths.length) return;
@@ -86,39 +93,121 @@ function removeUpload(i: number) {
 }
 useFileDrop({ active: () => app.view === "home", onDrop: addPaths });
 
-// ───────── 语音听写（桌面端；点话筒开/关，文字长进输入框） ─────────
+// ───────── 语音听写（与 ChatPanel 同一套）─────────
+// 点话筒 / 按右 Alt 开始说话，说话时文字流式长进输入框，再点 / 再按右 Alt 结束。
+// 桌面端走后端 cpal 录音（voice:partial 流式 + voice:dictation 终稿）；
+// 浏览器端本地录 WAV 上传后整段识别。
 const dictating = ref(false);
-let voiceUn: (() => void) | null = null;
+const voiceBusy = ref(false); // 浏览器路径:停录后上传+识别的 ~1s,期间禁重复点击
+let dictateBase = ""; // 听写开始时输入框已有内容，新转写续在其后
+const voiceUnlisteners: Array<() => void> = [];
+let webRec: WebVoiceRecorder | null = null;
+
 async function toggleDictate() {
-  if (!isTauri) {
-    toast.info("语音输入在桌面端可用");
-    return;
-  }
+  if (!isTauri) return toggleDictateWeb();
   try {
     if (!dictating.value) {
-      if (!voiceUn) {
-        voiceUn = await listen<{ text?: string; error?: string }>("voice:dictation", (f) => {
-          if (f?.text) {
-            input.value = (input.value + f.text).trimStart();
-            autoGrow();
-          }
-          if (f?.error) toast.error(`识别失败：${f.error}`);
-        });
-      }
+      dictateBase = input.value ? input.value.replace(/\s+$/, "") + " " : "";
       await invoke("voice_dictate_start");
       dictating.value = true;
     } else {
-      await invoke("voice_dictate_stop");
       dictating.value = false;
+      await invoke("voice_dictate_stop");
     }
-  } catch (e: any) {
+  } catch (e) {
     dictating.value = false;
-    toast.error(`语音失败：${e?.message ?? e}`);
+    toast.error(`语音输入：${humanizeError(e)}`);
   }
 }
+
+// 浏览器整段批处理:点开始 getUserMedia 录音 → 再点停止 → 16k WAV 上传 → 识别回填。
+async function toggleDictateWeb() {
+  if (voiceBusy.value) return;
+  if (!dictating.value) {
+    try {
+      dictateBase = input.value ? input.value.replace(/\s+$/, "") + " " : "";
+      webRec = new WebVoiceRecorder();
+      await webRec.start();
+      dictating.value = true;
+    } catch (e) {
+      dictating.value = false;
+      webRec = null;
+      toast.error(`语音输入：${humanizeError(e)}`);
+    }
+    return;
+  }
+  dictating.value = false;
+  const rec = webRec;
+  webRec = null;
+  voiceBusy.value = true;
+  try {
+    const wav = await rec?.stop();
+    if (!wav) return; // 太短/误触
+    const [up] = await uploadToBackend([wav]);
+    if (!up?.path) throw new Error("音频上传失败");
+    const r = await invoke<{ text?: string; error?: string }>("voice_transcribe_file", { path: up.path });
+    if (r?.text) {
+      input.value = dictateBase + r.text;
+      nextTick(() => {
+        autoGrow();
+        inputEl.value?.focus();
+      });
+    }
+  } catch (e) {
+    toast.error(`语音输入：${humanizeError(e)}`);
+  } finally {
+    voiceBusy.value = false;
+  }
+}
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  // 右 Alt 快捷开关听写（仅本窗口获焦时）。AltGr 在 Win 也以 AltRight 触发。
+  if (e.code === "AltRight") {
+    e.preventDefault();
+    if (!e.repeat) void toggleDictate();
+  }
+}
+
+onMounted(async () => {
+  window.addEventListener("keydown", onGlobalKeydown);
+  // 流式：说话中把当前转写实时续到输入框（从听写起点之后替换）
+  voiceUnlisteners.push(
+    await listen<{ text?: string }>("voice:partial", (p) => {
+      if (dictating.value && p && typeof p.text === "string") {
+        input.value = dictateBase + p.text;
+        nextTick(autoGrow);
+      }
+    })
+  );
+  // 结束：终稿（防污染后）落定到输入框
+  voiceUnlisteners.push(
+    await listen<{ text?: string; error?: string; cancelled?: boolean }>("voice:dictation", (f) => {
+      dictating.value = false;
+      if (f?.error) {
+        toast.error(`语音输入：${f.error}`);
+        return;
+      }
+      if (f?.cancelled) return;
+      if (typeof f?.text === "string" && f.text) {
+        input.value = dictateBase + f.text;
+        nextTick(() => {
+          autoGrow();
+          inputEl.value?.focus();
+        });
+      }
+    })
+  );
+});
+
 onBeforeUnmount(() => {
-  voiceUn?.();
-  if (dictating.value) invoke("voice_dictate_stop").catch(() => {});
+  window.removeEventListener("keydown", onGlobalKeydown);
+  for (const u of voiceUnlisteners) u();
+  if (webRec) {
+    webRec.cancel();
+    webRec = null;
+  } else if (dictating.value) {
+    void invoke("voice_dictate_stop").catch(() => {});
+  }
 });
 
 // ───────── 生成 ─────────
@@ -414,7 +503,8 @@ function onCoverErr(e: Event, s: TeachSample) {
             <button
               class="cb-ic mic"
               :class="{ live: dictating }"
-              title="语音输入"
+              :disabled="voiceBusy"
+              :title="voiceBusy ? '识别中…' : dictating ? '正在听写 · 点击 / 右 Alt 结束' : '语音输入 · 点击 / 按右 Alt 开始，再按一下结束'"
               @click="toggleDictate"
             >
               <Mic :size="19" :stroke-width="1.7" />
@@ -689,7 +779,7 @@ function onCoverErr(e: Event, s: TeachSample) {
   border: none;
   border-radius: 18px;
   background: var(--panel);
-  padding: 18px 18px 12px;
+  padding: 20px 20px 14px;
   box-shadow: 0 2px 13.4px var(--brand-glow);
   transition: box-shadow 0.2s cubic-bezier(0.32, 0.72, 0, 1);
 }
@@ -714,9 +804,11 @@ function onCoverErr(e: Event, s: TeachSample) {
   font-size: 17px;
   line-height: 27px;
   letter-spacing: -0.432px;
-  min-height: 31px;
-  max-height: 220px;
+  /* 起手就是一块「敢写长句」的大框（≈3 行），随内容长高，到 320 后框内滚动 */
+  min-height: 84px;
+  max-height: 320px;
   font-family: inherit;
+  overflow-y: auto;
 }
 .composer textarea::placeholder {
   color: var(--dim);

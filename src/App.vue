@@ -469,6 +469,22 @@ function startSbDrag(e: MouseEvent) {
   overflow: hidden;
   transition: grid-template-columns 180ms ease;
 }
+/* ── 三列成员显式定列（白屏防线，2026-07 真踩过）──
+   grid 自动放置依赖「成员都在文档流里」：任何一列成员被 display:none（或 v-if 移除），
+   后面的成员会自动补位挤进错误的列 —— 侧栏收起(曾是 display:none)时 .main 掉进
+   0px 的第 1 列，整个对话/首页区隐形。显式钉死列号后，成员增减都不会再串列。 */
+.shell > :deep(.sb) {
+  grid-column: 1;
+  grid-row: 1;
+}
+.shell > .main {
+  grid-column: 2;
+  grid-row: 1;
+}
+.shell > :deep(.dr) {
+  grid-column: 3;
+  grid-row: 1;
+}
 /* 拖宽时关过渡,否则跟手延迟 */
 .shell.sb-drag {
   transition: none;

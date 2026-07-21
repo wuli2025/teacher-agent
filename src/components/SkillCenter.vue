@@ -112,6 +112,19 @@ const currentGroups = computed(() => {
   return [...ordered, ...rest].map((c) => ({ title: c, skills: by.get(c)! }));
 });
 
+// 有专属海报封面的技能（public/skill-covers/<id>.webp，文档服务 6 件套）
+const COVER_IDS = new Set([
+  "polaris-deck-studio",
+  "docx",
+  "xlsx",
+  "pdf",
+  "doc-coauthoring",
+  "humanizer",
+]);
+function coverForSkill(skill: Skill): string | null {
+  return COVER_IDS.has(skill.id) ? `/skill-covers/${skill.id}.webp` : null;
+}
+
 function iconForSkill(skill: Skill) {
   const map: Record<string, any> = {
     "deep-research": Globe,
@@ -314,9 +327,15 @@ async function submitCreate() {
       </div>
       <div class="sc-grid" :class="{ mine: activeTab === 'mine' }">
       <div v-for="skill in group.skills" :key="skill.id" class="sc-card">
-        <!-- 封面位：数据里没有海报图，用占位底 + 技能图标顶上，保持 201×103 的版式 -->
+        <!-- 封面位：有海报图用海报，否则占位底 + 技能图标，保持 201×103 的版式 -->
         <div class="sc-cover">
-          <component :is="iconForSkill(skill)" :size="34" :stroke-width="1.4" />
+          <img
+            v-if="coverForSkill(skill)"
+            :src="coverForSkill(skill)!"
+            :alt="skill.name"
+            class="sc-cover-img"
+          />
+          <component v-else :is="iconForSkill(skill)" :size="34" :stroke-width="1.4" />
         </div>
         <div class="sc-card-body">
           <div class="sc-card-name" :title="skill.name">{{ skill.name }}</div>
@@ -695,6 +714,13 @@ async function submitCreate() {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+}
+.sc-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .sc-card-body {
   flex: 1;

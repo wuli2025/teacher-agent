@@ -88,6 +88,36 @@ static UPDATER: Lazy<Mutex<Inner>> = Lazy::new(|| {
     })
 });
 
+/// 语义化版本比较：`a` 是否严格比 `b` 新。逐段按数字比（容忍前缀 `v` 与非数字段），
+/// 避免字符串比较把 "1.0.10" 判成小于 "1.0.9"。
+///
+/// **为什么不能用 `!=`**：更新装好后，若某个更新源的 CDN 还缓存着旧的 latest.json，
+/// 返回的版本号会比当前还旧——`!=` 会把它当成「有更新」，于是刚更完又弹提示、循环往复。
+/// 同理，落盘的「可装版本」若因手动升级而残留旧号，启动时也会被 `!=` 误判成待装。
+fn is_newer(a: &str, b: &str) -> bool {
+    let parse = |s: &str| -> Vec<u64> {
+        s.trim_start_matches('v')
+            .split('.')
+            .map(|seg| {
+                seg.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(0)
+            })
+            .collect()
+    };
+    let (pa, pb) = (parse(a), parse(b));
+    for i in 0..pa.len().max(pb.len()) {
+        let x = pa.get(i).copied().unwrap_or(0);
+        let y = pb.get(i).copied().unwrap_or(0);
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
 // ───────────────────────── 初始化 ─────────────────────────
 
 /// 启动时调用一次（在 `setup` 内）：记录当前版本 + 持久化路径，
@@ -104,10 +134,10 @@ pub fn init(app: &AppHandle) -> Result<()> {
     g.current_version = current.clone();
     g.persist_path = path.clone();
 
-    // 重启续提示：上次发现的版本若仍 ≠ 当前 → 直接摆成 available（离线可见）；
-    // 若已 == 当前（已装上）→ 清标记。
+    // 重启续提示：上次发现的版本若仍**比当前新** → 直接摆成 available（离线可见）；
+    // 若 ≤ 当前（已装上，或手动升级后残留的旧标记）→ 清标记，避免刚更完还弹提示。
     if let Some(p) = load_persisted(&path) {
-        if p.version != current {
+        if is_newer(&p.version, &current) {
             g.state = UpdaterState::Available {
                 version: p.version,
                 notes: p.notes,
@@ -160,7 +190,11 @@ fn transition(app: &AppHandle, next: UpdaterState) -> UpdaterState {
 /// 纯函数：根据「当前版本」与「检查结果」决定落点状态。抽出来便于单测（对标 OpenCode 的注入式可测性）。
 pub fn resolve_check(current: &str, found: Option<(String, String)>) -> UpdaterState {
     match found {
-        Some((version, notes)) if version != current => UpdaterState::Available { version, notes },
+        // 必须是**严格更新**才算有更新：镜像 CDN 缓存的旧 latest.json 报回旧版本号时，
+        // 不能因为「不等于当前」就再弹一次提示（用户刚更完又见弹窗的根因）。
+        Some((version, notes)) if is_newer(&version, current) => {
+            UpdaterState::Available { version, notes }
+        }
         _ => UpdaterState::UpToDate,
     }
 }
@@ -175,7 +209,9 @@ pub fn resolve_check_error(
     message: String,
 ) -> UpdaterState {
     match persisted {
-        Some((version, notes)) if version != current => UpdaterState::Available { version, notes },
+        Some((version, notes)) if is_newer(&version, current) => {
+            UpdaterState::Available { version, notes }
+        }
         _ => UpdaterState::Error { message },
     }
 }
@@ -543,6 +579,35 @@ mod tests {
             "检查更新失败: 网络超时".into(),
         );
         assert!(matches!(s, UpdaterState::Error { .. }));
+    }
+
+    #[test]
+    fn check_resolves_up_to_date_when_remote_older() {
+        // 关键回归：更新装好后，某镜像 CDN 还缓存着旧 latest.json → 报回旧版本号。
+        // 旧逻辑用 `!=` 会再弹「有更新」，正确行为是视为已最新。
+        assert_eq!(
+            resolve_check("1.0.7", Some(("1.0.6".into(), String::new()))),
+            UpdaterState::UpToDate
+        );
+    }
+
+    #[test]
+    fn check_error_reports_error_when_persisted_older() {
+        // 手动升级后残留的旧落盘标记（< 当前）不该再触发「有更新」弹窗。
+        let s = resolve_check_error(
+            "1.0.7",
+            Some(("1.0.6".into(), String::new())),
+            "检查更新失败: 网络超时".into(),
+        );
+        assert!(matches!(s, UpdaterState::Error { .. }));
+    }
+
+    #[test]
+    fn is_newer_compares_numerically() {
+        assert!(is_newer("1.0.10", "1.0.9")); // 字符串序会判错的经典坑
+        assert!(is_newer("v1.1.0", "1.0.9"));
+        assert!(!is_newer("1.0.6", "1.0.7"));
+        assert!(!is_newer("1.0.7", "1.0.7"));
     }
 
     #[test]

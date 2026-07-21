@@ -105,10 +105,12 @@ type Drag = {
   dy: number;
   nw?: { x: number; y: number; w: number; h: number };
   moved: boolean;
+  /** 按下那一刻它已是唯一选中 → 松手没拖动就进改字(豆包式「再点一下」)。 */
+  wasSel: boolean;
 };
-// ── 单击拖=排版 / 双击=改字 的自动识别 ──
-// 单击(含拖动)整盒任意位置都是排版:选中/移动/缩放,和平常拖排版的手感一致。
-// 双击文本/表格盒 → 直接改这里的字。图形/图片没字,双击不响应。
+// ── 豆包式点击节奏 ──
+// 点一下=框选中(出手柄);按住拖=移动;拉手柄=缩放;
+// 对已选中的文本/表格盒**再点一下**(或直接双击)=进入改字。图形/图片没字,再点不响应。
 /** 双击可改字的盒子(底下真元素带 [data-e])。 */
 const textish = (b: FreeBox) => ["text", "table"].includes(String(b?.type ?? ""));
 /** 正在改字的盒子:覆盖层让位(pointer-events:none),光标交给底下真元素。 */
@@ -187,8 +189,9 @@ function onBoxDown(i: number, e: MouseEvent) {
   }
   e.preventDefault(); // 防选中文字;副作用是焦点不再自动落过来 → 手动 focus,键盘操作才收得到
   rootEl.value?.focus();
+  const wasSel = selSet.value.length === 1 && selSet.value[0] === i;
   if (!selSet.value.includes(i)) selSet.value = [i]; // 点未选中的 → 单选它;点已选的 → 整组拖
-  startDrag("move", i, undefined, e);
+  startDrag("move", i, undefined, e, wasSel);
 }
 /** 双击文本/表格盒 → 进改字(光标落在双击处)。 */
 function onBoxDblClick(i: number, e: MouseEvent) {
@@ -203,14 +206,14 @@ function onHandleDown(i: number, handle: string, e: MouseEvent) {
   e.stopPropagation();
   startDrag("resize", i, handle, e);
 }
-function startDrag(kind: Drag["kind"], idx: number, handle: string | undefined, e: MouseEvent) {
+function startDrag(kind: Drag["kind"], idx: number, handle: string | undefined, e: MouseEvent, wasSel = false) {
   const b = props.boxes[idx];
   if (!b) return;
   drag.value = {
     kind, idx, handle,
     set: kind === "move" ? [...selSet.value] : [idx],
     startX: e.clientX, startY: e.clientY,
-    orig: bounds(b), dx: 0, dy: 0, moved: false,
+    orig: bounds(b), dx: 0, dy: 0, moved: false, wasSel,
   };
   window.addEventListener("mousemove", onMove);
   window.addEventListener("mouseup", onUp, { once: true });
@@ -252,7 +255,7 @@ function onMove(e: MouseEvent) {
   }
   drag.value = { ...d };
 }
-function onUp(_e: MouseEvent) {
+function onUp(e: MouseEvent) {
   window.removeEventListener("mousemove", onMove);
   const d = drag.value;
   drag.value = null;
@@ -263,7 +266,14 @@ function onUp(_e: MouseEvent) {
     const el = realEl(i);
     if (el) el.style.transform = "";
   }
-  if (!d.moved) return; // 纯点击:只选中,不发空操作(双击才进改字)
+  if (!d.moved) {
+    // 纯点击(没拖动):豆包式节奏 —— 第一下选中;对已选中的文本/表格盒再点一下就进改字。
+    if (d.kind === "move") {
+      if (d.wasSel && textish(props.boxes[d.idx])) beginTextEdit(d.idx, e.clientX, e.clientY);
+      else if (!d.wasSel && d.set.length > 1) selSet.value = [d.idx]; // 群选里单点某成员:收敛为单选它
+    }
+    return;
+  }
   if (d.kind === "move") {
     if (d.dx || d.dy) emit("move", d.set, Math.round(d.dx), Math.round(d.dy));
   } else if (d.nw) {

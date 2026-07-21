@@ -1053,7 +1053,7 @@ function fillDemo() {
             <button
               v-if="isPpt && previewSpec && phase === 'done' && !viewerRef?.curIsFreeform"
               class="dk-ghost"
-              title="把本页解锁成自由版式：元素可拖拽移动 / 拉手柄缩放（不可逆）。改文字不用解锁，点了就能改"
+              title="把本页解锁成自由版式（不可逆）：点一下选中，拖动移动、拉手柄缩放，再点一下直接改字"
               @click="viewerRef?.toggleFreeEdit()"
             >
               <Unlock :size="13" /> 解锁拖拽

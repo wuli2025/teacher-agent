@@ -135,9 +135,13 @@ const sortedConvs = computed<Conversation[]>(() => {
 
 <template>
   <aside class="sb" :class="{ collapsed: app.sidebarCollapsed }">
-    <!-- Head：顶部留白，仅保留收起按钮（品牌 logo/文字已按要求移除）。
-         收起后整列 display:none,展开入口在主区左上角的浮动按钮(App.vue)。 -->
+    <!-- Head：设计稿 Frame 18 —— 26.35px 白底圆角块内嵌吉祥物 + LUMI 字标（left:19/top:45），
+         右侧收起按钮。收起后整列 display:none,展开入口在主区左上角的浮动按钮(App.vue)。 -->
     <div class="sb-head">
+      <span class="brand">
+        <span class="brand-tile"><img src="/mascot/mascot.png" alt="LUMI" /></span>
+        <span class="brand-word">LUMI</span>
+      </span>
       <button
         class="collapse-btn push-right"
         title="收起侧栏 (Ctrl+B)"
@@ -221,7 +225,6 @@ const sortedConvs = computed<Conversation[]>(() => {
     <div v-if="!app.sidebarCollapsed" class="proj-section">
       <div class="proj-head">
         <span class="proj-title">历史对话</span>
-        <button class="ic-btn plus" title="新建对话" @click="newConv()">+</button>
       </div>
 
       <!-- 对话过滤(标题即时过滤,Esc 清空) -->
@@ -331,8 +334,41 @@ const sortedConvs = computed<Conversation[]>(() => {
 .sb-head {
   display: flex;
   align-items: center;
-  padding: 4px 4px 8px;
+  /* 设计稿：logo 距侧栏左缘 19px(.sb 自带 8px,这里补 11px)、上方留足呼吸感 */
+  padding: 10px 4px 10px 11px;
   gap: 6px;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.brand-tile {
+  /* Frame 16：26.35px 白底、radius 5.1，吉祥物按设计稿略大于容器(27.5px)溢出裁切 */
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  background: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+.brand-tile img {
+  width: 27px;
+  height: 27px;
+  object-fit: contain;
+}
+.brand-word {
+  /* 设计稿字标图 37×22,以文字复刻:Inter 600 */
+  font-family: "Inter", system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.4px;
+  color: #191919;
 }
 .collapse-btn.push-right {
   margin-left: auto;
@@ -461,7 +497,7 @@ const sortedConvs = computed<Conversation[]>(() => {
 /* 「历史任务」是分区标签，不是第二主角：与功能栏同一无衬线字族，字号降一档、字距收敛，
    让视觉重量落在下面的对话行上（原来衬线 + 1.5px 字距与上方功能栏割裂） */
 .proj-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   letter-spacing: -0.3125px;
   color: var(--muted);
@@ -857,7 +893,7 @@ const sortedConvs = computed<Conversation[]>(() => {
   gap: 12px;
   padding: 11px 10px;
   height: 35px;
-  font-size: 14px;
+  font-size: 15px;
   letter-spacing: -0.3125px;
   color: var(--text);
   border-radius: 10px;

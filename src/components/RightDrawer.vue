@@ -651,7 +651,7 @@ function fmtSize(n: number): string {
                 <button
                   v-if="!deckGenerating && !deckEditorRef?.curIsFreeform"
                   class="pv-deck-edit"
-                  title="把本页解锁成自由版式：元素可拖拽/缩放（不可逆）。改文字不用解锁，点了就能改"
+                  title="把本页解锁成自由版式（不可逆）：点一下选中，拖动移动、拉手柄缩放，再点一下直接改字"
                   @click="deckEditorRef?.toggleFreeEdit()"
                 >
                   <Unlock :size="13" :stroke-width="1.8" />

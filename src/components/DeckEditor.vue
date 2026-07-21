@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from "vue";
 import {
-  FileText, Shapes, Image as ImageIcon, Table2, BarChart3,
-  SlidersHorizontal, Play, X, Loader, Move,
+  Shapes, Image as ImageIcon, Table2, BarChart3,
+  SlidersHorizontal, Play, X, Loader,
 } from "@lucide/vue";
 import {
   NATIVE_THEME_META, TRANSITIONS, BOX_ANIMS,
@@ -125,23 +125,11 @@ function hexPatch(key: "color" | "fill", e: Event) {
 const pendingInsert = ref<null | (() => void)>(null);
 function withFreeform(fn: () => void) {
   if (viewerRef.value?.curIsFreeform) {
-    viewerRef.value?.setFfMode("layout"); // 插完就能拖 → 切到排版模式出手柄
     fn();
     return;
   }
   pendingInsert.value = fn;
   viewerRef.value?.toggleFreeEdit();
-}
-
-// ── 文本 / 排版 双模式 ──
-// 「文本」= 点文字直接改(语义页天生如此;自由页收起拖拽覆盖层)。
-// 「排版」= 单击拖拽移动/拉手柄缩放,双击文字直接改字(语义页先自动解锁成自由版式,不可逆)。
-const ffLayoutOn = computed(() => !!viewerRef.value?.layoutActive);
-function modeText() {
-  viewerRef.value?.setFfMode("text");
-}
-function modeLayout() {
-  viewerRef.value?.toggleFreeEdit(); // 内部:置排版模式;语义页顺带解锁成 freeform
 }
 watch(
   () => viewerRef.value?.curIsFreeform,
@@ -355,23 +343,9 @@ watch(specTheme, () => (skinning.value = null));
 
 <template>
   <div class="de">
-    <!-- 插入工具条(格式/缩放常驻;插入按钮仅自由编辑态) -->
+    <!-- 插入工具条(格式/缩放常驻;插入按钮仅自由编辑态)。
+         不再分「文本/排版」模式:点一下=框选(拖动移动/拉手柄缩放),再点一下=改字。 -->
     <div class="de-tools">
-      <template v-if="editable && !generating">
-        <button
-          class="de-tool"
-          :class="{ on: !ffLayoutOn }"
-          title="文本模式：点任意文字直接修改（不动版式）"
-          @click="modeText"
-        ><FileText :size="13" /> 文本</button>
-        <button
-          class="de-tool"
-          :class="{ on: ffLayoutOn }"
-          title="排版模式：拖拽移动、拉手柄缩放，双击文字直接改（语义页会先解锁成自由版式，不可逆）"
-          @click="modeLayout"
-        ><Move :size="13" /> 排版</button>
-        <span class="de-tools-sep" />
-      </template>
       <template v-if="(freeEditing || full) && !generating">
         <span class="de-shape-wrap">
           <button class="de-tool" :class="{ on: shapeMenu }" title="插入图形" @click="shapeMenu = !shapeMenu">

@@ -344,20 +344,14 @@ const curBoxes = computed<FreeBox[]>(() => (Array.isArray(curSlide.value?.boxes)
 // 语义页点字直改。生成中 canOp 为 false,两种编辑随之自动关闭。
 const freeEdit = computed(() => canOp.value && curIsFreeform.value);
 const ffeRef = ref<InstanceType<typeof FreeformEditor> | null>(null);
-/** 把当前语义页解锁成自由版式(不可逆,一步 op 可撤销);解锁后拖拽手柄自动出现。 */
-// ── 自由页双模式:文本(点字直改) / 排版(单击拖+双击改字自动识别) ──
-// 排版是默认:单击/拖动整盒任意位置=移动缩放,双击文本/表格盒=直接改字。
-// 「文本」模式是显式兜底:整层覆盖层收起,全页只改字(点哪儿都不会误拖)。
-const ffMode = ref<"text" | "layout">("layout");
-function setFfMode(m: "text" | "layout") {
-  ffMode.value = m;
-}
-/** 排版模式生效中:覆盖层接管鼠标,只拖不改字。 */
-const layoutActive = computed(() => freeEdit.value && ffMode.value === "layout");
+// ── 豆包式统一交互(不再分「文本/排版」两个模式) ──
+// freeform 页覆盖层常开:点一下=框选中(可拖动移动/拉手柄缩放),
+// 对已选中的文本再点一下(或双击)=直接改字。语义页仍是点字直改(版式由 autofit 保证)。
+const layoutActive = computed(() => freeEdit.value);
 
+/** 把当前语义页解锁成自由版式(不可逆,一步 op 可撤销);解锁后拖拽手柄自动出现。 */
 function toggleFreeEdit() {
   if (!canOp.value) return;
-  ffMode.value = "layout"; // 解锁的意图就是要挪 → 直接进排版模式
   if (curIsFreeform.value) return;
   op({ kind: "freeform", index: page.value });
 }
@@ -400,18 +394,18 @@ function selectBox(i: number) {
 
 // 标题栏(父组件)要调放映/缩放/进出自由编辑,格式面板要读当前页号/选中盒子,工具条要插元素,
 // 动画面板要预览/按序选中
-defineExpose({ present, page, zoom, setZoom, freeEdit, curIsFreeform, toggleFreeEdit, ffMode, setFfMode, layoutActive, selBoxIdx, addBox, previewAnims, previewingAnims, selectBox });
+defineExpose({ present, page, zoom, setZoom, freeEdit, curIsFreeform, toggleFreeEdit, layoutActive, selBoxIdx, addBox, previewAnims, previewingAnims, selectBox });
 
 // ───────── 点字直改 ─────────
 // 只改文字,不动版式 —— autofit 仍然生效,所以用户**改不坏排版**(这正是"版式态"的红利:
 // 豆包没有重排引擎、改字就溢出,我们改完自动重算字号)。
 // 舞台里带 data-e="<字段路径>" 的元素点一下变 contenteditable,失焦/Enter 落盘。
-const editing = computed(() => canOp.value && !layoutActive.value); // 文本模式常开:点字直改
+const editing = computed(() => canOp.value && !layoutActive.value); // 语义页:点字直改;freeform 页交给覆盖层
 const dirty = ref(false); // 有未落盘的改动(纯提示)
 const stageEl = ref<HTMLElement | null>(null);
 
 function onStageClick(e: MouseEvent) {
-  if (layoutActive.value) return; // 排版模式:点击交给覆盖层,不翻页
+  if (layoutActive.value) return; // freeform 页:点击交给覆盖层,不翻页
   if (!editing.value) {
     go(page.value + 1, true); // 非编辑态:点击翻页(原行为)
     return;
@@ -570,7 +564,7 @@ onBeforeUnmount(() => {
         ref="stageEl"
         class="dkv-stage"
         :class="{ editing }"
-        :title="layoutActive ? '排版模式：拖拽移动 · 拉手柄缩放 · 双击文字直接改 · Del 删除' : editing ? '点任意文字即可修改 · Enter 保存 · Esc 撤销' : '点击翻下一页 · ←→ 翻页 · Ctrl+滚轮缩放'"
+        :title="layoutActive ? '点一下选中 · 拖动移动 · 拉手柄缩放 · 再点一下改字 · Del 删除' : editing ? '点任意文字即可修改 · Enter 保存 · Esc 撤销' : '点击翻下一页 · ←→ 翻页 · Ctrl+滚轮缩放'"
         @click="onStageClick"
         @wheel="onStageWheel"
       >
@@ -628,7 +622,8 @@ onBeforeUnmount(() => {
         >
           <Undo2 :size="12" /> 撤销
         </button>
-        <span v-if="editing" class="dkv-tip">点文字直接改 · Enter 保存 · Esc 撤销</span>
+        <span v-if="layoutActive" class="dkv-tip">点一下选中 · 拖动移动 · 拉手柄缩放 · 再点一下改字</span>
+        <span v-else-if="editing" class="dkv-tip">点文字直接改 · Enter 保存 · Esc 撤销</span>
         <span v-else-if="dirty" class="dkv-tip ok">已保存改动</span>
         <span v-if="generating" class="dkv-gen"><Loader :size="12" class="dkv-spin" /> 生成中…</span>
       </div>
