@@ -6,9 +6,9 @@ import { parseSpecLoose, setSpecText, applySlideOp, type SlideOp } from "../lib/
 import { resolveSpecImages } from "../lib/specImages";
 import { usePolling } from "../composables/usePolling";
 import { useSpecEdit } from "../composables/useSpecEdit";
-import DeckViewer from "./DeckViewer.vue";
-// 播放器实例:导出条上的「编辑」按钮要调它进出自由编辑态(与演示工坊同一入口语义)
-const deckViewerRef = ref<InstanceType<typeof DeckViewer> | null>(null);
+import DeckEditor from "./DeckEditor.vue";
+// 编辑器实例:导出条上的「放映/解锁拖拽」要调它(viewer 现住在 DeckEditor 里)
+const deckEditorRef = ref<InstanceType<typeof DeckEditor> | null>(null);
 import {
   X,
   FolderOpen,
@@ -323,6 +323,22 @@ watch(deckCandidatePath, (p) => {
     app.sidebarCollapsed = false;
   }
 });
+// ── 演示编辑器要铺满：一出现 spec 就把抽屉放大到宽档(工具条+舞台+格式面板才不挤) ──
+// 只在「本来是窄预览」时自动放大,离开这份 PPT 再收回 —— 用户自己点收起的不去覆盖。
+const deckAutoExpanded = ref(false);
+watch(
+  () => !!deckCandidatePath.value,
+  (isDeck) => {
+    if (isDeck && !artifacts.expanded) {
+      deckAutoExpanded.value = true;
+      artifacts.expanded = true;
+    } else if (!isDeck && deckAutoExpanded.value) {
+      deckAutoExpanded.value = false;
+      artifacts.expanded = false;
+    }
+  },
+  { immediate: true }
+);
 
 // 所有对 spec 的改动共用一个事务(与演示工坊同一个 composable):
 // 读盘 → 改对象 → 写盘 → 刷预览 → 重转 pptx,并自动记撤销栈。
@@ -348,6 +364,33 @@ function onDeckEdit(slideIdx: number, path: string, value: string) {
 function onDeckOp(op: SlideOp) {
   deckError.value = null;
   void specEdit.mutate((obj) => applySlideOp(obj, op));
+}
+// 演示编辑默认铺满整个窗口(固定层):图2那套豆包布局 —— 大画布 + 顶部插入工具条 +
+// 右侧格式面板 + 浮动文字格式条。侧抽屉太窄塞不下,舞台会被挤没,所以默认就全屏。
+// 顶栏「退出全屏」可切回紧凑抽屉。
+const deckMax = ref(true);
+// 豆包式「退出全屏」:不是缩回窄抽屉,而是编辑器让出左侧一列露出对话面板 ——
+// 左边继续跟 AI 聊着改,右边画布实时刷新。再点「全屏」收回对话列。
+const deckChat = ref(false);
+function toggleDeckChat() {
+  deckChat.value = !deckChat.value;
+  // 露出的左列得真的是对话:当前主视图不是聊天就切过去
+  if (deckChat.value && app.view !== "chat") app.setView("chat");
+}
+// 同步给 App.vue:分栏期间抽屉在网格里的占宽清零,聊天列才有地方
+watch(
+  () => deckChat.value && deckMax.value && !!deckSpec.value,
+  (on) => (app.deckChatSplit = on),
+  { immediate: true }
+);
+// 换肤:deck 级 spec.theme,内容不变,预览与导出同步换色。
+function onDeckTheme(id: string) {
+  deckError.value = null;
+  void specEdit.mutate((obj) => {
+    if (obj.theme === id) return false;
+    obj.theme = id;
+    return true;
+  });
 }
 // 换了 spec 文件:旧撤销栈会把上一份的内容写进新文件 —— 必须清。
 // (这个 watch 只能待在 specEdit 声明之后:上面那些 immediate watch 在 setup 期就同步跑,
@@ -406,6 +449,7 @@ function fmtSize(n: number): string {
       collapsed: !artifacts.current && !projects.activeRoot,
       preview: !!artifacts.current || !!projects.activeRoot,
       resizing: drDragging,
+      'chat-split': deckChat && deckMax && !!deckSpec,
     }"
   >
     <!-- 左缘收缩条：拖拽调宽（三种形态各记各的宽），双击恢复默认 -->
@@ -583,10 +627,11 @@ function fmtSize(n: number): string {
         <template v-else-if="artifacts.payload">
           <!-- 演示 spec / 原生 pptx → 豆包式播放器(与演示工坊同一渲染器,预览即导出)。
                必须排在 text/binary 分支前:spec 是 kind=text、原生 pptx 是 kind=binary。 -->
-          <div v-if="deckSpec" class="pv-deck">
+          <div v-if="deckSpec" class="pv-deck" :class="{ full: deckMax, chat: deckMax && deckChat }">
             <div v-if="deckError" class="pv-deck-err">{{ deckError }}</div>
             <!-- 状态文案在左,动作按钮全部靠右(pv-deck-acts 吃掉中间空白) -->
             <div class="pv-deck-bar">
+              <span v-if="deckMax" class="pv-deck-file" :title="artifacts.payload?.name">{{ artifacts.payload?.name }}</span>
               <span v-if="deckGenerating" class="pv-deck-live">
                 <Loader :size="12" :stroke-width="1.8" class="spin" /> 生成中 · 已出 {{ deckPages }} 页
               </span>
@@ -598,16 +643,16 @@ function fmtSize(n: number): string {
                   class="pv-deck-edit"
                   :disabled="!deckPages"
                   title="全屏放映（F5 · Esc 退出）"
-                  @click="deckViewerRef?.present()"
+                  @click="deckEditorRef?.present()"
                 >
                   <Play :size="13" :stroke-width="1.8" />
                   <span>放映</span>
                 </button>
                 <button
-                  v-if="!deckGenerating && !deckViewerRef?.curIsFreeform"
+                  v-if="!deckGenerating && !deckEditorRef?.curIsFreeform"
                   class="pv-deck-edit"
                   title="把本页解锁成自由版式：元素可拖拽/缩放（不可逆）。改文字不用解锁，点了就能改"
-                  @click="deckViewerRef?.toggleFreeEdit()"
+                  @click="deckEditorRef?.toggleFreeEdit()"
                 >
                   <Unlock :size="13" :stroke-width="1.8" />
                   <span>解锁拖拽</span>
@@ -622,17 +667,30 @@ function fmtSize(n: number): string {
                   <Download v-else :size="13" :stroke-width="1.8" />
                   <span>{{ deckExporting ? "导出中…" : "导出 PPTX" }}</span>
                 </button>
+                <button
+                  class="pv-deck-edit"
+                  :title="deckChat ? '收起对话，画布铺满窗口' : '退出全屏：左侧露出对话框，边聊边改'"
+                  @click="toggleDeckChat"
+                >
+                  <component :is="deckChat ? Maximize2 : Minimize2" :size="13" :stroke-width="1.8" />
+                  <span>{{ deckChat ? "全屏" : "退出全屏" }}</span>
+                </button>
+                <button v-if="deckMax" class="pv-deck-edit" title="关闭编辑器" @click="artifacts.close()">
+                  <X :size="14" :stroke-width="2" />
+                </button>
               </div>
             </div>
-            <DeckViewer
-              ref="deckViewerRef"
+            <DeckEditor
+              ref="deckEditorRef"
               class="pv-deck-viewer"
               :spec="deckSpec"
               :generating="deckGenerating"
               :editable="!deckGenerating"
+              :full="deckMax && !deckChat"
               :can-undo="specEdit.canUndo.value"
               @edit="onDeckEdit"
               @op="onDeckOp"
+              @theme="onDeckTheme"
               @undo="specEdit.undo()"
             />
           </div>
@@ -711,6 +769,21 @@ function fmtSize(n: number): string {
 /* 收起：整列不渲染 —— 右侧边彻底消失，不留任何导轨/小框 */
 .dr.collapsed {
   display: none;
+}
+/* 豆包式分栏:整个抽屉钉死到右侧(fixed),左边那条完全让给主区的对话面板 ——
+   不再靠栅格列宽让位(抽屉元素会漏到最左盖住对话),直接把它移出文档流固定在右半屏。 */
+.dr.chat-split {
+  position: fixed;
+  left: min(560px, 44vw);
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 300;
+  margin: 0;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: -14px 0 36px rgba(0, 0, 0, 0.16);
 }
 
 /* ───────── 左缘收缩条（WorkBuddy 式）───────── */
@@ -819,6 +892,28 @@ function fmtSize(n: number): string {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+/* 全屏编辑:Teleport 到 body 后铺满整个视口,画布拿到最大空间 */
+.pv-deck.full {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: var(--bg);
+}
+/* 豆包式对话布局:抽屉(.dr.chat-split)已 fixed 到右半屏,编辑器只需填满它,不再各自 fixed */
+.pv-deck.full.chat {
+  position: absolute;
+  inset: 0;
+  z-index: auto;
+}
+.pv-deck-file {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 340px;
 }
 .pv-deck-viewer {
   flex: 1;

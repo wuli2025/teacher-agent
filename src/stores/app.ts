@@ -30,13 +30,15 @@ export type ViewKey =
   | "deck"
   | "web_studio";
 
-/** 首页「三大工坊」当前模式：AI课件(PPT) / AI教案 / 生成数学课件 */
-export type HomeMode = "ppt" | "lesson" | "math";
+/** 首页模式：新建对话(通用助手) / AI课件(PPT) / AI教案 / 生成数学课件。
+ *  chat 与三大工坊是两种不同版式的首页（设计稿 1-新建对话主页 vs 2-AI课件PPT）。 */
+export type HomeMode = "chat" | "ppt" | "lesson" | "math";
 
 export const useAppStore = defineStore("app", () => {
   // 默认落地到九章爱学式首页（大标题 + 干净输入框 + 范例库）。
   const view = ref<ViewKey>("home");
-  const homeMode = ref<HomeMode>("ppt");
+  // 默认落地「新建对话」通用助手首页（设计稿 1-新建对话主页：居中问候 + 底部输入，无案例广场）。
+  const homeMode = ref<HomeMode>("chat");
   function setHomeMode(m: HomeMode) {
     homeMode.value = m;
     view.value = "home";
@@ -90,9 +92,11 @@ export const useAppStore = defineStore("app", () => {
       )
         return t;
       if (t === "nougat") return "aurora-light"; // 旧键迁移
-      return "aurora-light"; // 未选择过 → 默认极光琉璃画框(软白)
+      // 未选择过 → 浅色平铺（2026-07 设计稿复刻：齐边无画框、无极光）。
+      // 极光画框仍在设置里可选，只是不再是默认。
+      return "light";
     } catch {
-      return "aurora-light";
+      return "light";
     }
   }
   const theme = ref<Theme>(loadTheme());
@@ -155,6 +159,9 @@ export const useAppStore = defineStore("app", () => {
   function setView(v: ViewKey) {
     view.value = v;
   }
+  // 豆包式 PPT 编辑「退出全屏」:编辑器让出左列露出对话面板。置位期间 App.vue 把
+  // 右抽屉在网格里的占宽清零,否则聊天列会被 46vw 的抽屉挤没(编辑器本体是 fixed 层,不受影响)。
+  const deckChatSplit = ref(false);
   // 在「专家团」页点「召唤」→ 投递召唤意图并切回对话区,由 ChatPanel 落地。
   function requestSummon(kind: "expert" | "team", id: string) {
     pendingSummon.value = { kind, id, nonce: (pendingSummon.value?.nonce ?? 0) + 1 };
@@ -483,6 +490,7 @@ export const useAppStore = defineStore("app", () => {
     theme,
     setTheme,
     setView,
+    deckChatSplit,
     pendingSummon,
     requestSummon,
     toggleSidebar,

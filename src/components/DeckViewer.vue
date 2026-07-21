@@ -345,8 +345,20 @@ const curBoxes = computed<FreeBox[]>(() => (Array.isArray(curSlide.value?.boxes)
 const freeEdit = computed(() => canOp.value && curIsFreeform.value);
 const ffeRef = ref<InstanceType<typeof FreeformEditor> | null>(null);
 /** 把当前语义页解锁成自由版式(不可逆,一步 op 可撤销);解锁后拖拽手柄自动出现。 */
+// ── 自由页双模式:文本(点字直改) / 排版(单击拖+双击改字自动识别) ──
+// 排版是默认:单击/拖动整盒任意位置=移动缩放,双击文本/表格盒=直接改字。
+// 「文本」模式是显式兜底:整层覆盖层收起,全页只改字(点哪儿都不会误拖)。
+const ffMode = ref<"text" | "layout">("layout");
+function setFfMode(m: "text" | "layout") {
+  ffMode.value = m;
+}
+/** 排版模式生效中:覆盖层接管鼠标,只拖不改字。 */
+const layoutActive = computed(() => freeEdit.value && ffMode.value === "layout");
+
 function toggleFreeEdit() {
-  if (!canOp.value || curIsFreeform.value) return;
+  if (!canOp.value) return;
+  ffMode.value = "layout"; // 解锁的意图就是要挪 → 直接进排版模式
+  if (curIsFreeform.value) return;
   op({ kind: "freeform", index: page.value });
 }
 function onFfPatch(i: number, patch: Partial<FreeBox>) {
@@ -379,27 +391,27 @@ function addBox(box: FreeBox) {
   op({ kind: "box-add", index: page.value, boxSpec: box });
 }
 /** 选中盒子的下标(格式面板读)。 */
-const selBoxIdx = computed(() => (freeEdit.value ? ffeRef.value?.sel ?? null : null));
+const selBoxIdx = computed(() => (layoutActive.value ? ffeRef.value?.sel ?? null : null));
 
 /** 动画面板顺序列表点行选中对应盒子(仅自由编辑态)。 */
 function selectBox(i: number) {
-  if (freeEdit.value) ffeRef.value?.select(i);
+  if (layoutActive.value) ffeRef.value?.select(i);
 }
 
 // 标题栏(父组件)要调放映/缩放/进出自由编辑,格式面板要读当前页号/选中盒子,工具条要插元素,
 // 动画面板要预览/按序选中
-defineExpose({ present, page, zoom, setZoom, freeEdit, curIsFreeform, toggleFreeEdit, selBoxIdx, addBox, previewAnims, previewingAnims, selectBox });
+defineExpose({ present, page, zoom, setZoom, freeEdit, curIsFreeform, toggleFreeEdit, ffMode, setFfMode, layoutActive, selBoxIdx, addBox, previewAnims, previewingAnims, selectBox });
 
 // ───────── 点字直改 ─────────
 // 只改文字,不动版式 —— autofit 仍然生效,所以用户**改不坏排版**(这正是"版式态"的红利:
 // 豆包没有重排引擎、改字就溢出,我们改完自动重算字号)。
 // 舞台里带 data-e="<字段路径>" 的元素点一下变 contenteditable,失焦/Enter 落盘。
-const editing = computed(() => canOp.value && !freeEdit.value); // 语义页常开:点字直改,无需先点「编辑」
+const editing = computed(() => canOp.value && !layoutActive.value); // 文本模式常开:点字直改
 const dirty = ref(false); // 有未落盘的改动(纯提示)
 const stageEl = ref<HTMLElement | null>(null);
 
 function onStageClick(e: MouseEvent) {
-  if (freeEdit.value) return; // 自由编辑态:点击交给覆盖层,不翻页
+  if (layoutActive.value) return; // 排版模式:点击交给覆盖层,不翻页
   if (!editing.value) {
     go(page.value + 1, true); // 非编辑态:点击翻页(原行为)
     return;
@@ -407,14 +419,49 @@ function onStageClick(e: MouseEvent) {
   const el = (e.target as HTMLElement)?.closest?.("[data-e]") as HTMLElement | null;
   if (!el || el.isContentEditable) return;
   e.stopPropagation();
-  beginEdit(el);
+  beginEdit(el, e.clientX, e.clientY);
 }
 
-function beginEdit(el: HTMLElement) {
+// 点击坐标 → 文本光标位置。元素是点了才变 contenteditable 的,浏览器不会替我们把
+// 光标落在点击处(默认落最左)。不能用 caretRangeFromPoint:自由版式的拖拽覆盖层
+// 罩在文字上,命中测试永远打在覆盖层上。改为遍历 el 的文本节点,逐字符量矩形,
+// 取离点击点最近的位置 —— 与层叠无关,怎么盖都能落对。
+function placeCaretAt(el: HTMLElement, x: number, y: number): boolean {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  const probe = document.createRange();
+  let best: { node: Text; offset: number; score: number } | null = null;
+  for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+    const len = n.length;
+    for (let i = 0; i <= len; i++) {
+      probe.setStart(n, i);
+      probe.setEnd(n, i);
+      const r = probe.getClientRects()[0] ?? probe.getBoundingClientRect();
+      if (!r || (!r.height && !r.width && !r.x && !r.y)) continue;
+      const cy = r.y + r.height / 2;
+      // 先比行(垂直距离),同一行里再比水平距离
+      const score = Math.abs(cy - y) * 1000 + Math.abs(r.x - x);
+      if (!best || score < best.score) best = { node: n, offset: i, score };
+    }
+  }
+  if (!best) return false;
+  const range = document.createRange();
+  range.setStart(best.node, best.offset);
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  return true;
+}
+
+function beginEdit(el: HTMLElement, x?: number, y?: number) {
   el.contentEditable = "true";
   el.spellcheck = false;
   el.focus();
-  // 光标落到点击处即可(不全选),改错别字更顺手
+  // 光标落到点击处(不全选),改错别字更顺手。自由版式双击进来时,覆盖层的
+  // pointer-events:none 要等 Vue 下一帧才刷上,立即取点会命中覆盖层 → 等一帧重试
+  if (x !== undefined && y !== undefined && !placeCaretAt(el, x, y)) {
+    requestAnimationFrame(() => requestAnimationFrame(() => placeCaretAt(el, x, y)));
+  }
   const path = el.dataset.e!;
   const before = props.spec ? getSpecText((props.spec as any).slides?.[page.value], path) : "";
   const finish = () => {
@@ -523,14 +570,14 @@ onBeforeUnmount(() => {
         ref="stageEl"
         class="dkv-stage"
         :class="{ editing }"
-        :title="freeEdit ? '自由编辑：拖拽移动 · 拉手柄缩放 · 双击文本改字 · Del 删除' : editing ? '点任意文字即可修改 · Enter 保存 · Esc 撤销' : '点击翻下一页 · ←→ 翻页 · Ctrl+滚轮缩放'"
+        :title="layoutActive ? '排版模式：拖拽移动 · 拉手柄缩放 · 双击文字直接改 · Del 删除' : editing ? '点任意文字即可修改 · Enter 保存 · Esc 撤销' : '点击翻下一页 · ←→ 翻页 · Ctrl+滚轮缩放'"
         @click="onStageClick"
         @wheel="onStageWheel"
       >
         <div class="dkv-fit stage rel" :style="stageFitStyle">
           <div v-html="pages[page] ?? ''"></div>
           <FreeformEditor
-            v-if="freeEdit && curIsFreeform && canOp"
+            v-if="layoutActive && curIsFreeform && canOp"
             ref="ffeRef"
             :boxes="curBoxes"
             :stage-host="stageEl"

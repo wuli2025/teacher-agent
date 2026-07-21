@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
 import {
-  Puzzle,
   Plus,
   Sparkles,
   Globe,
@@ -264,25 +263,7 @@ async function submitCreate() {
 
 <template>
   <div class="skill-center">
-    <!-- Header -->
-    <div class="sc-header">
-      <div class="sc-title">
-        <Puzzle :size="20" :stroke-width="1.8" class="sc-title-icon" />
-        <span>技能中心</span>
-      </div>
-      <div class="sc-header-actions">
-        <button class="sc-import-btn" @click="openImportModal" title="从外部 URL / git 仓库 / 本地文件导入">
-          <Download :size="14" :stroke-width="2" />
-          <span>导入/下载</span>
-        </button>
-        <button class="sc-new-btn" @click="openCreateModal">
-          <Plus :size="14" :stroke-width="2" />
-          <span>新技能</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Search + Tabs -->
+    <!-- 顶部一行：Tab + 次级按钮 + 搜索（设计稿 Frame 28，去掉了原来的独立标题行） -->
     <div class="sc-toolbar">
       <div class="sc-tabs">
         <button
@@ -290,7 +271,7 @@ async function submitCreate() {
           :class="{ active: activeTab === 'market' }"
           @click="activeTab = 'market'"
         >
-          市场精选
+          精品推荐
         </button>
         <button
           class="sc-tab"
@@ -301,9 +282,23 @@ async function submitCreate() {
           <span v-if="mySkills.length > 0" class="sc-tab-badge">{{ mySkills.length }}</span>
         </button>
       </div>
-      <div class="sc-search">
-        <SearchGlass :size="14" :stroke-width="1.8" class="sc-search-icon" />
-        <input v-model="searchQuery" placeholder="搜索技能..." type="text" />
+      <div class="sc-toolbar-right">
+        <button class="sc-ghost-btn sc-new-btn" @click="openCreateModal">
+          <Plus :size="14" :stroke-width="2" />
+          <span>新技能</span>
+        </button>
+        <button
+          class="sc-ghost-btn sc-import-btn"
+          title="从外部 URL / git 仓库 / 本地文件导入"
+          @click="openImportModal"
+        >
+          <Download :size="14" :stroke-width="2" />
+          <span>导入</span>
+        </button>
+        <div class="sc-search">
+          <SearchGlass :size="15" :stroke-width="1.8" class="sc-search-icon" />
+          <input v-model="searchQuery" placeholder="输入关键词搜索技能" type="text" />
+        </div>
       </div>
     </div>
 
@@ -317,49 +312,53 @@ async function submitCreate() {
         <span class="sc-group-title">{{ group.title }}</span>
         <span class="sc-group-count">{{ group.skills.length }}</span>
       </div>
-      <div class="sc-grid">
+      <div class="sc-grid" :class="{ mine: activeTab === 'mine' }">
       <div v-for="skill in group.skills" :key="skill.id" class="sc-card">
-        <div class="sc-card-head">
-          <div class="sc-card-icon">
-            <component :is="iconForSkill(skill)" :size="22" :stroke-width="1.6" />
-          </div>
-          <div class="sc-card-meta">
-            <div class="sc-card-name">{{ skill.name }}</div>
-            <div class="sc-card-source">{{ sourceLabel(skill.source) }}</div>
-          </div>
+        <!-- 封面位：数据里没有海报图，用占位底 + 技能图标顶上，保持 201×103 的版式 -->
+        <div class="sc-cover">
+          <component :is="iconForSkill(skill)" :size="34" :stroke-width="1.4" />
         </div>
-        <div class="sc-card-desc">{{ skill.description }}</div>
-        <div class="sc-card-foot">
-          <!-- 未安装 → 安装按钮 -->
-          <button
-            v-if="!skill.installed"
-            class="sc-card-install"
-            :disabled="installing.has(skill.id)"
-            @click="onInstall(skill)"
-          >
-            <Download :size="13" :stroke-width="1.9" />
-            <span>{{ installing.has(skill.id) ? "安装中…" : "安装" }}</span>
-          </button>
-          <!-- 已安装 → 状态 + 卸载 + 开关 -->
-          <template v-else>
-            <span class="sc-installed-badge">已安装</span>
+        <div class="sc-card-body">
+          <div class="sc-card-name" :title="skill.name">{{ skill.name }}</div>
+          <div class="sc-card-sub" :title="skill.description">
+            {{ skill.description || sourceLabel(skill.source) }}
+          </div>
+          <div class="sc-card-foot">
+            <!-- 精品推荐：黑色「安装」/ 半透明黑「已安装」胶囊 -->
+            <template v-if="activeTab === 'market'">
+              <button
+                v-if="!skill.installed"
+                class="sc-pill sc-pill-install"
+                :disabled="installing.has(skill.id)"
+                @click="onInstall(skill)"
+              >
+                <Download :size="14" :stroke-width="1.9" />
+                <span>{{ installing.has(skill.id) ? "安装中…" : "安装" }}</span>
+              </button>
+              <span v-else class="sc-pill sc-pill-installed">已安装</span>
+            </template>
+            <!-- 我的技能：开关 + 「已安装」文字 -->
+            <template v-else>
+              <label class="switch" title="开启/关闭" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="skillsStore.has(skill.id)"
+                  @change="skillsStore.toggle(skill.id)"
+                />
+                <span class="slider round" />
+              </label>
+              <span class="sc-installed-text">已安装</span>
+            </template>
+            <!-- 删除图标固定在卡片右下角 -->
             <button
               v-if="skill.removable"
               class="sc-card-delete"
-              @click="onDelete(skill)"
               title="卸载 / 删除"
+              @click="onDelete(skill)"
             >
-              <Trash2 :size="13" :stroke-width="1.8" />
+              <Trash2 :size="16" :stroke-width="1.8" />
             </button>
-            <label class="switch" title="开启/关闭">
-              <input
-                type="checkbox"
-                :checked="skillsStore.has(skill.id)"
-                @change="skillsStore.toggle(skill.id)"
-              />
-              <span class="slider round" />
-            </label>
-          </template>
+          </div>
         </div>
       </div>
       </div>
@@ -462,63 +461,9 @@ async function submitCreate() {
 .skill-center {
   height: 100%;
   overflow-y: auto;
-  padding: 24px 32px;
-  background: var(--bg);
-}
-.sc-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-.sc-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--serif);
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--ink);
-  letter-spacing: 1px;
-}
-.sc-title-icon {
-  color: var(--primary);
-}
-.sc-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.sc-new-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  background: var(--btn-solid-bg);
-  color: var(--btn-solid-text);
-  border: none;
-  border-radius: 6px;
-  font-size: 12.5px;
-  cursor: pointer;
-}
-.sc-new-btn:hover {
-  background: var(--primary);
-}
-.sc-import-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  background: transparent;
-  color: var(--text-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 12.5px;
-  cursor: pointer;
-}
-.sc-import-btn:hover {
-  border-color: var(--primary);
-  color: var(--primary);
+  /* 主区底色跟设计稿走 #FAFAFA；左边距对齐正文列 */
+  padding: 32px 32px 40px;
+  background: var(--bg-chat);
 }
 
 /* 导入弹窗内的提示 */
@@ -548,51 +493,57 @@ async function submitCreate() {
   gap: 6px;
   padding: 6px 12px;
   background: transparent;
-  color: var(--primary);
+  color: var(--text-2);
   border: 1px dashed var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 12px;
   cursor: pointer;
 }
 .import-browse:hover {
-  border-color: var(--primary);
-  background: var(--primary-soft);
+  border-color: var(--brand);
+  color: var(--brand);
+  background: var(--active-bg);
 }
 
+/* ═══════ 顶部操作条（设计稿 Frame 28：1056×36.5，无分隔线） ═══════ */
 .sc-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 20px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 26px;
 }
 .sc-tabs {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 16px; /* 设计稿 Tab 间距 */
 }
+/* Tab 是这一页的标题级元素：20px，选中态用唯一强调色（绿渐变实底白字） */
 .sc-tab {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 6px 14px;
+  min-width: 105px;
+  height: 36px;
+  padding: 6px 12px;
   border: none;
   background: transparent;
-  color: var(--muted);
-  font-size: 13px;
-  border-radius: 4px;
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: 0.05px;
+  border-radius: 8px;
   cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
-.sc-tab:hover {
-  color: var(--text);
-  background: var(--bg-soft);
+.sc-tab:hover:not(.active) {
+  background: var(--active-bg);
 }
 .sc-tab.active {
-  color: var(--ink);
-  background: var(--panel);
-  font-weight: 600;
-  box-shadow: var(--shadow-sm);
+  background: var(--brand-grad);
+  color: #fff;
+  font-weight: 700;
 }
 .sc-tab-badge {
   display: inline-flex;
@@ -601,21 +552,61 @@ async function submitCreate() {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  background: var(--primary-soft);
-  color: var(--primary);
+  /* 高亮退成中性灰；选中 Tab 上换成半透明白，保证在绿底上可读 */
+  background: var(--active-bg);
+  color: var(--text-2);
   border-radius: 9px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
 }
+.sc-tab.active .sc-tab-badge {
+  background: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+.sc-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+/* 次级按钮：中性填充底 + radius 8，不再用描边/品牌色 */
+.sc-ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 36px;
+  padding: 6px 12px;
+  background: var(--active-bg);
+  color: var(--text-2);
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.23px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.15s;
+}
+.sc-new-btn {
+  min-width: 88px;
+}
+.sc-import-btn {
+  min-width: 88px;
+}
+.sc-ghost-btn:hover {
+  filter: brightness(0.96);
+}
+/* 全圆角搜索框 260×36.5 */
 .sc-search {
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 10px;
-  width: 240px;
+  gap: 5px;
+  background: var(--active-bg);
+  border: none;
+  border-radius: 1014px;
+  padding: 9px 16px;
+  width: 260px;
+  height: 36.5px;
 }
 .sc-search-icon {
   color: var(--muted);
@@ -625,21 +616,23 @@ async function submitCreate() {
   border: none;
   outline: none;
   background: transparent;
-  font-size: 12.5px;
+  font-size: 14px;
   color: var(--text);
   width: 100%;
+  letter-spacing: -0.15px;
 }
 .sc-search input::placeholder {
-  color: var(--dim);
+  color: rgba(117, 117, 117, 0.45);
 }
 
+/* ═══════ 卡片网格：定宽 201，列间距 13 ═══════ */
 .sc-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, 201px);
+  gap: 20px 13px;
 }
 .sc-group + .sc-group {
-  margin-top: 26px;
+  margin-top: 30px;
 }
 .sc-group-head {
   display: flex;
@@ -647,11 +640,13 @@ async function submitCreate() {
   gap: 8px;
   margin: 0 0 12px;
 }
+/* 分组小标题 16/700（设计稿「办公文档」「教学教研」） */
 .sc-group-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary, var(--text));
-  letter-spacing: 0.02em;
+  font-size: 16px;
+  line-height: 36px;
+  font-weight: 700;
+  letter-spacing: 0.05px;
+  color: var(--ink);
 }
 .sc-group-count {
   display: inline-flex;
@@ -660,136 +655,145 @@ async function submitCreate() {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  background: var(--primary-soft);
-  color: var(--primary);
+  background: var(--active-bg);
+  color: var(--muted);
   border-radius: 9px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
 }
+
 .sc-card {
+  position: relative;
+  width: 201px;
+  height: 229px;
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  padding: 16px;
-  box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.15s, border-color 0.15s;
+  border: none;
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+/* 「我的技能」卡比精品推荐矮 8px（设计稿 221 vs 229） */
+.sc-grid.mine .sc-card {
+  height: 221px;
 }
 .sc-card:hover {
-  box-shadow: var(--shadow);
-  border-color: var(--border);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
 }
-.sc-card-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.sc-card-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--primary-soft);
-  color: var(--primary);
+/* 封面 201×103，只圆上面两角；无海报图时用占位底 + 技能图标 */
+.sc-cover {
+  width: 100%;
+  height: 103px;
+  flex-shrink: 0;
+  border-radius: 12px 12px 0 0;
+  background: var(--selection-bg);
+  color: var(--muted);
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
 }
-.sc-card-meta {
+.sc-card-body {
   flex: 1;
-  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 14px 14px;
 }
 .sc-card-name {
-  font-size: 14px;
+  font-size: 16px;
+  line-height: 36px;
   font-weight: 600;
+  letter-spacing: 0.05px;
   color: var(--text);
-}
-.sc-card-source {
-  font-size: 11px;
-  color: var(--muted);
-  margin-top: 2px;
-}
-.sc-card-desc {
-  font-size: 12px;
-  color: var(--text-2);
-  line-height: 1.6;
-  margin-bottom: 12px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sc-card-sub {
+  font-size: 14px;
+  line-height: 17px;
+  font-weight: 400;
+  letter-spacing: -0.31px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sc-card-foot {
+  margin-top: auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  justify-content: flex-end;
 }
+
+/* 动作胶囊 86×30 radius 36 */
+.sc-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 86px;
+  height: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 36px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.05px;
+  color: #fff;
+  cursor: pointer;
+}
+.sc-pill-install {
+  /* 反色实底：走 token，黑夜模式不会白底白字 */
+  background: var(--btn-solid-bg);
+  color: var(--btn-solid-text);
+}
+.sc-pill-install:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.sc-pill-installed {
+  background: rgba(0, 0, 0, 0.25);
+  cursor: default;
+}
+/* 「我的技能」的状态文字 */
+.sc-installed-text {
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.05px;
+  color: #999999;
+}
+/* 删除图标固定右下角 */
 .sc-card-delete {
-  padding: 5px;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   background: transparent;
   border: none;
-  color: var(--muted);
-  border-radius: 4px;
+  color: var(--dim);
+  border-radius: 6px;
   cursor: pointer;
 }
 .sc-card-delete:hover {
   color: var(--vermilion);
   background: var(--vermilion-soft);
 }
-.sc-card-use {
-  padding: 5px 14px;
-  background: var(--btn-solid-bg);
-  color: var(--btn-solid-text);
-  border: none;
-  border-radius: 5px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.sc-card-use:hover {
-  background: var(--primary);
-}
 
-/* 安装按钮 */
-.sc-card-install {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 14px;
-  background: var(--btn-solid-bg);
-  color: var(--btn-solid-text);
-  border: none;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.sc-card-install:hover {
-  background: var(--primary);
-}
-.sc-card-install:disabled {
-  background: var(--border);
-  color: var(--muted);
-  cursor: default;
-}
-/* 已安装徽标 */
-.sc-installed-badge {
-  margin-right: auto;
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  background: var(--ok-soft);
-  color: var(--ok);
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-/* ─── 绿键 Toggle Switch ─── */
+/* ─── Toggle Switch 51×23，白色 19px 圆钮 ─── */
 .switch {
   position: relative;
   display: inline-block;
-  width: 36px;
-  height: 20px;
+  width: 51px;
+  height: 23px;
+  flex-shrink: 0;
 }
 .switch input {
   opacity: 0;
@@ -800,46 +804,65 @@ async function submitCreate() {
   position: absolute;
   cursor: pointer;
   inset: 0;
-  background: var(--border-strong);
-  border-radius: 20px;
+  background: #bfbfbf; /* 关闭态灰 */
+  border-radius: 36px;
   transition: 0.2s;
 }
 .slider::before {
   content: "";
   position: absolute;
-  height: 16px;
-  width: 16px;
+  height: 19px;
+  width: 19px;
   left: 2px;
-  bottom: 2px;
-  background: white;
+  top: 2px;
+  background: #fff;
   border-radius: 50%;
   transition: 0.2s;
 }
+/* 开启态是页面唯一强调色 */
 input:checked + .slider {
-  background: #10b981;
+  background: var(--brand-grad);
 }
 input:checked + .slider::before {
-  transform: translateX(16px);
+  transform: translateX(28px);
 }
 
 .sc-empty {
   text-align: center;
   padding: 60px 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .sc-empty-btn {
   margin-top: 12px;
-  padding: 6px 16px;
-  background: var(--btn-solid-bg);
-  color: var(--btn-solid-text);
+  padding: 8px 18px;
+  background: var(--brand-grad);
+  color: #fff;
   border: none;
-  border-radius: 6px;
-  font-size: 12.5px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
 }
 .sc-empty-btn:hover {
-  background: var(--primary);
+  filter: brightness(1.04);
+}
+
+/* 黑夜模式：写死的浅色需要各自兜底 */
+html[data-theme="dark"] .sc-pill-installed {
+  background: rgba(255, 255, 255, 0.22);
+}
+html[data-theme="dark"] .sc-installed-text {
+  color: var(--muted);
+}
+html[data-theme="dark"] .slider {
+  background: rgba(255, 255, 255, 0.24);
+}
+html[data-theme="dark"] .sc-search input::placeholder {
+  color: var(--dim);
+}
+html[data-theme="dark"] .sc-card:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
 }
 
 /* ─────────── 创建弹窗 ─────────── */
@@ -918,7 +941,8 @@ input:checked + .slider::before {
 }
 .form-row input:focus,
 .form-row textarea:focus {
-  border-color: var(--primary);
+  /* 聚焦高亮改用唯一强调色（绿），不再用紫/蓝品牌色 */
+  border-color: var(--brand);
 }
 .form-error {
   color: var(--vermilion);
@@ -940,17 +964,18 @@ input:checked + .slider::before {
   cursor: pointer;
 }
 .modal-btn.secondary {
-  background: var(--bg-soft);
+  background: var(--active-bg);
   color: var(--text-2);
 }
 .modal-btn.secondary:hover {
-  background: var(--border);
+  filter: brightness(0.96);
 }
 .modal-btn.primary {
-  background: var(--btn-solid-bg);
-  color: var(--btn-solid-text);
+  background: var(--brand-grad);
+  color: #fff;
+  font-weight: 600;
 }
 .modal-btn.primary:hover {
-  background: var(--primary);
+  filter: brightness(1.04);
 }
 </style>

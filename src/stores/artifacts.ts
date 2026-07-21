@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import { useAppStore } from "./app";
 import {
   artifacts as api,
   isTauri,
@@ -41,8 +42,20 @@ export const useArtifactsStore = defineStore("artifacts", () => {
   const exporting = ref(false);
   const exportError = ref<string | null>(null);
 
+  // 豆包式沉浸预览：打开产物时左侧栏整列收起、右抽屉直接放大；
+  // 关闭预览时只还原「由我们收起」的侧栏（用户本来就收着的不动）。
+  const autoCollapsedSidebar = ref(false);
   async function open(path: string) {
     const name = path.split(/[\\/]/).pop() || path;
+    const isNewOpen = current.value?.path !== path; // refresh() 重读同一文件时不重复折腾布局
+    if (isNewOpen) {
+      const app = useAppStore();
+      if (!app.sidebarCollapsed) {
+        app.toggleSidebar();
+        autoCollapsedSidebar.value = true;
+      }
+      expanded.value = true;
+    }
     current.value = { path, name };
     loading.value = true;
     error.value = null;
@@ -63,6 +76,11 @@ export const useArtifactsStore = defineStore("artifacts", () => {
   }
 
   function close() {
+    if (autoCollapsedSidebar.value) {
+      const app = useAppStore();
+      if (app.sidebarCollapsed) app.toggleSidebar(); // 用户中途手动展开过就别再动
+      autoCollapsedSidebar.value = false;
+    }
     current.value = null;
     payload.value = null;
     error.value = null;

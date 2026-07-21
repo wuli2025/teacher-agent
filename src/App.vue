@@ -288,6 +288,10 @@ function onEnvDone() {
 // 用户在收缩条上拖过的宽度（drawerWidths）优先于自适应默认档位。
 // 没有任何预览对象时右侧整列 0 宽 —— 默认「文件抽屉」已删,右侧只随成品/项目预览出现。
 const drawerTrack = computed(() => {
+  // 豆包式 PPT 分栏:编辑器是 fixed 层压在右侧(左缘 min(560px,44vw),与 RightDrawer 的
+  // .pv-deck.full.chat 保持一致)。抽屉列吃掉编辑器盖住的那部分宽度,主列(聊天)刚好
+  // 收窄到露出的左条 —— 否则聊天面板仍按全宽排版,居中的输入框会被编辑器拦腰盖住。
+  if (app.deckChatSplit) return "calc(100vw - min(560px, 44vw))";
   const w = app.drawerWidths;
   if (artifacts.current) {
     if (artifacts.expanded) {
@@ -453,15 +457,15 @@ function startSbDrag(e: MouseEvent) {
 <style scoped>
 /* 连屏一体化边框（仿 Codex）：整个 shell 是一块连续的框面（侧栏+顶部+四周同色），
    主区/右抽屉是嵌在框里的圆角面板 —— 上边框与左边框在面板左上圆角处汇合 */
+/* 2026-07 设计稿复刻：默认（浅色/深色）不再做「悬浮画框」——侧栏与主区齐边平铺、
+   无顶部框带、无圆角、无缝隙，靠 #F2F2F2 / #FAFAFA 的一档色差分区。
+   极光两套主题仍保留画框（下方 aurora 覆盖块把留白与圆角加回去）。 */
 .shell {
   height: 100vh;
   display: grid;
   background: var(--bg-side);
-  /* 顶部留一条通栏的框面带（横跨侧栏与主区），让窗口顶部有呼吸感、
-     整窗像嵌在一块画框里，而不是内容直接顶到标题栏 */
-  padding-top: 24px;
-  /* 外圈四角倒圆：消除左上角（内容与标题栏交汇处）的正方形棱角，整窗只剩圆角 */
-  border-radius: 12px;
+  padding-top: 0;
+  border-radius: 0;
   overflow: hidden;
   transition: grid-template-columns 180ms ease;
 }
@@ -526,12 +530,11 @@ html[data-theme="dark"] .shell {
   background: var(--bg-chat);
   display: flex;
   flex-direction: column;
-  /* 圆润嵌入面板：四周均匀留出框面缝隙（含左侧，避免与侧栏齐平相撞出菱角接缝），
-     面板呈干净的悬浮圆角卡，与染色标题栏组成连屏框面 */
-  margin: 8px;
-  border: 1px solid var(--hairline);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
+  /* 设计稿：主区直接贴着侧栏铺满，不描边不投影（见 .shell 注释） */
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 .placeholder {
   flex: 1;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ImageProviderPanel from "./ImageProviderPanel.vue";
 import {
   Zap,
@@ -22,8 +22,19 @@ import {
   CircleAlert,
   Star,
   Wallet,
+  Palette,
+  LogOut,
 } from "@lucide/vue";
 import { useProvidersStore } from "../stores/providers";
+import { useAppStore } from "../stores/app";
+import { isTauri } from "../tauri";
+import {
+  manualCheck,
+  checking as updChecking,
+  updateVersion,
+  updateError,
+  applyUpdate,
+} from "../composables/useUpdater";
 import type {
   ProviderView,
   TokenBucket,
@@ -34,9 +45,103 @@ import type {
 
 const props = defineProps<{ collapsed?: boolean }>();
 const store = useProvidersStore();
+const app = useAppStore();
 
 const open = ref(false);
 const filter = ref("");
+
+// ── 设计稿 §2/§3:账号条 + 上弹设置浮层 ─────────────────────────
+// 为什么 Teleport 到 body:侧栏 .sb 上有 overflow:hidden,浮层比侧栏内容宽(288 > 269)
+// 且要向上溢出,留在 dock 内会被裁掉;所以浮层用 fixed 定位,开的瞬间按账号条的
+// 屏幕坐标算一次位置。
+const settingsOpen = ref(false);
+const acctEl = ref<HTMLElement | null>(null);
+const popPos = ref({ left: 14, bottom: 60 });
+/** 检查更新的结果条(设计稿 §5:结果态直接把整个浮层换成一条 toast) */
+type UpdToast = { kind: "ok" | "info" | "err"; text: string };
+const updToast = ref<UpdToast | null>(null);
+/** 退出确认弹窗(设计稿 §4) */
+const exitAsk = ref(false);
+
+/** 主题分段控件 —— 只映射 app.ts 里**真实存在**的主题,不新造「护眼」皮。
+ *  第三段给 aurora-light(极光琉璃软白框),四主题的完整选择仍在 设置 页。 */
+const themeSegs = [
+  { key: "light", label: "浅色" },
+  { key: "dark", label: "深色" },
+  { key: "aurora-light", label: "极光" },
+] as const;
+/** aurora-dark 没有独立分段:归到「深色」高亮,避免出现一段都不亮的空档 */
+const themeSeg = computed(() =>
+  app.theme === "aurora-dark" ? "dark" : app.theme
+);
+
+function openSettings() {
+  const r = acctEl.value?.getBoundingClientRect();
+  if (r) {
+    popPos.value = {
+      left: Math.max(8, r.left),
+      // 浮层底边贴着账号条上沿,留 8px 呼吸
+      bottom: Math.max(8, window.innerHeight - r.top + 8),
+    };
+  }
+  updToast.value = null;
+  settingsOpen.value = true;
+}
+function closeSettings() {
+  settingsOpen.value = false;
+  updToast.value = null;
+}
+/** 账号条:整条点开设置浮层(服务商切换改由浮层第一条进入,功能不丢) */
+function onAcctClick() {
+  if (settingsOpen.value) closeSettings();
+  else openSettings();
+}
+/** 浮层里的「服务商与用量」→ 打开原有的供应商大面板 */
+function openProviders() {
+  closeSettings();
+  open.value = true;
+}
+
+/** 检查更新:复用 useUpdater 的单飞状态机,等它落定后再决定 toast 文案 */
+async function onCheckUpdate() {
+  if (updChecking.value) return;
+  updToast.value = null;
+  await manualCheck();
+  // manualCheck 只负责「发起」,结论由后端事件回填,这里轮询等 checking 落定
+  for (let i = 0; i < 120 && updChecking.value; i++) {
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  if (updateVersion.value) {
+    updToast.value = { kind: "info", text: `发现新版本 ${updateVersion.value}` };
+  } else if (updateError.value) {
+    updToast.value = { kind: "err", text: "检查更新失败,请稍后再试" };
+  } else {
+    updToast.value = { kind: "ok", text: "已是最新版本" };
+  }
+}
+function onToastClick() {
+  if (updToast.value?.kind === "info") applyUpdate();
+}
+
+/** 退出:本应用无登录体系,「退出登录」按语义落成**退出应用**,避免误导。
+ *  桌面端走 Tauri process 插件;浏览器/Docker 没有进程可杀,优雅降级为关标签页。 */
+async function doExit() {
+  exitAsk.value = false;
+  closeSettings();
+  if (isTauri) {
+    try {
+      const { exit } = await import("@tauri-apps/plugin-process");
+      await exit(0);
+      return;
+    } catch (e) {
+      console.warn("[dock] exit failed:", e);
+    }
+  }
+  window.close(); // 非脚本打开的标签页会被浏览器拒绝,故下面兜底提示
+  setTimeout(() => {
+    if (!document.hidden) alert("浏览器模式请直接关闭该标签页即可退出。");
+  }, 400);
+}
 
 // Codex 授权 (原生 Device Code OAuth)
 const codexOpen = ref(false);
@@ -69,6 +174,8 @@ const periods: { key: Period; label: string }[] = [
 onMounted(() => {
   store.refresh();
   store.refreshUsage();
+  // Esc 收口:供应商面板/设置浮层/退出确认都靠它,常驻绑定一次即可
+  window.addEventListener("keydown", onEsc);
 });
 
 watch(open, (v) => {
@@ -79,13 +186,11 @@ watch(open, (v) => {
     store.refreshCodexProxy();
     store.refreshClaudeAuth();
     if (store.currentId) store.refreshBalance(store.currentId);
-    nextTick(() => window.addEventListener("keydown", onEsc));
   } else {
     codexOpen.value = false;
     claudeOpen.value = false;
     resetCodexAuth();
     resetClaudeAuth();
-    window.removeEventListener("keydown", onEsc);
   }
 });
 // 切换供应商后,自动拉取新当前供应商的额度(面板开着时才查,省请求)
@@ -102,7 +207,9 @@ onBeforeUnmount(() => {
 });
 function onEsc(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
-  if (claudeOpen.value) claudeOpen.value = false;
+  if (exitAsk.value) exitAsk.value = false;
+  else if (settingsOpen.value) closeSettings();
+  else if (claudeOpen.value) claudeOpen.value = false;
   else if (codexOpen.value) codexOpen.value = false;
   else open.value = false;
 }
@@ -457,31 +564,106 @@ function subtitleOf(p: ProviderView): string {
 
 <template>
   <div class="dock-root">
-    <!-- resting 药丸 -->
+    <!-- 账号条(设计稿 §3):269×48 / radius 9 / 26px 绿渐变头像 + 当前服务商名 + chevron。
+         上方的 1px 分隔线由 Sidebar 的 .footer(border-top + padding-top:6px)提供,这里不再画,
+         否则会出现两条线。 -->
     <button
-      class="pill"
-      :class="{ rail: props.collapsed, active: open }"
-      :title="current ? `当前: ${current.name}` : 'API 供应商'"
-      @click="open = !open"
+      ref="acctEl"
+      class="acct"
+      :class="{ rail: props.collapsed, active: settingsOpen }"
+      :title="current ? `当前: ${current.name} · 点击打开设置` : '设置'"
+      @click="onAcctClick"
     >
-      <span
-        class="dot"
-        :style="{
-          background: '#2f6fd0',
-          boxShadow: '0 0 0 3px #2f6fd029',
-        }"
-      />
+      <span class="avatar" />
       <template v-if="!props.collapsed">
-        <span class="pill-main">
-          <span class="pill-name">{{ current?.name || "选择供应商" }}</span>
-          <span class="pill-sub">
-            <Zap :size="9" :stroke-width="2.4" />
-            {{ fmt(todayTotal) }} · 今日
-          </span>
+        <span class="acct-main">
+          <span class="acct-name">{{ current?.name || "选择服务商" }}</span>
         </span>
-        <ChevronUp class="chev" :class="{ flip: open }" :size="14" :stroke-width="2" />
+        <ChevronUp class="chev" :class="{ flip: settingsOpen }" :size="14" :stroke-width="1.17" />
       </template>
     </button>
+
+    <!-- 设置浮层 / 更新结果 toast / 退出确认 —— 统一 Teleport 出侧栏(见 script 注释) -->
+    <Teleport to="body">
+      <Transition name="pop-fade">
+        <div v-if="settingsOpen" class="pop-overlay" @click="closeSettings">
+          <!-- ① 结果态:整条绿渐变 toast 取代浮层(设计稿 §5.2) -->
+          <div
+            v-if="updToast"
+            class="upd-toast"
+            :class="updToast.kind"
+            :style="{ left: popPos.left + 'px', bottom: popPos.bottom + 'px' }"
+            @click.stop="onToastClick"
+          >
+            <Check v-if="updToast.kind === 'ok'" :size="24" :stroke-width="1.6" />
+            <RefreshCw v-else-if="updToast.kind === 'info'" :size="24" :stroke-width="1.6" />
+            <CircleAlert v-else :size="24" :stroke-width="1.6" />
+            <span class="ut-text">{{ updToast.text }}</span>
+            <button class="ut-close" title="关闭" @click.stop="closeSettings">
+              <X :size="10" :stroke-width="1.33" />
+            </button>
+          </div>
+
+          <!-- ② 常态:288 宽设置浮层 -->
+          <div
+            v-else
+            class="setpop"
+            :style="{ left: popPos.left + 'px', bottom: popPos.bottom + 'px' }"
+            @click.stop
+          >
+            <!-- 服务商切换/用量:原有大面板的入口,搬进浮层,功能不丢 -->
+            <button class="set-row" @click="openProviders">
+              <Zap :size="24" :stroke-width="1.6" class="set-ic" />
+              <span class="set-lab">服务商与用量</span>
+              <span class="set-tail">{{ current?.name || "未选择" }}</span>
+            </button>
+
+            <!-- 外观:分段控件直接驱动 app.setTheme -->
+            <div class="set-row static">
+              <Palette :size="24" :stroke-width="1.6" class="set-ic" />
+              <span class="set-lab">外观</span>
+              <span class="seg">
+                <button
+                  v-for="s in themeSegs"
+                  :key="s.key"
+                  class="seg-i"
+                  :class="{ on: themeSeg === s.key }"
+                  @click="app.setTheme(s.key)"
+                >
+                  {{ s.label }}
+                </button>
+              </span>
+            </div>
+
+            <button class="set-row" :disabled="updChecking" @click="onCheckUpdate">
+              <RefreshCw :size="24" :stroke-width="1.6" class="set-ic" :class="{ spin: updChecking }" />
+              <span class="set-lab">{{ updChecking ? "正在检查…" : "检查更新" }}</span>
+            </button>
+
+            <div class="set-div" />
+
+            <button class="set-row" @click="exitAsk = true">
+              <LogOut :size="24" :stroke-width="1.6" class="set-ic" />
+              <span class="set-lab">退出应用</span>
+            </button>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- 确认退出(设计稿 §4):514×180,黑底主按钮 -->
+      <Transition name="pop-fade">
+        <div v-if="exitAsk" class="exit-mask" @click.self="exitAsk = false">
+          <div class="exit-box">
+            <div class="exit-title">确认退出</div>
+            <div class="exit-desc">退出后终止所有正在执行的任务,确认要退出吗?</div>
+            <div class="exit-acts">
+              <button class="exit-btn ghost" @click="exitAsk = false">取消</button>
+              <button class="exit-btn solid" @click="doExit">确认退出</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <Teleport to="body">
       <Transition name="dock-fade">
@@ -1073,28 +1255,179 @@ function subtitleOf(p: ProviderView): string {
 <style scoped>
 .dock-root { width: 100%; }
 
-.pill {
+/* ── 账号条(设计稿 §3)────────────────────────
+   无描边无阴影,靠 hover 的中性灰底表达可点;头像是唯一的绿渐变强调点 */
+.acct {
   width: 100%;
+  height: 48px;
   display: flex;
   align-items: center;
   gap: 9px;
   padding: 7px 9px;
-  background: linear-gradient(180deg, var(--panel) 0%, var(--bg-soft) 100%);
-  border: 1px solid var(--border-soft);
+  background: transparent;
+  border: none;
   border-radius: 9px;
   text-align: left;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
-  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: background 140ms ease;
 }
-.pill:hover { border-color: var(--border-strong); box-shadow: var(--shadow); }
-.pill.active { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-soft); }
-.pill.rail { justify-content: center; padding: 8px 0; }
-.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; transition: box-shadow 200ms ease; }
-.pill-main { flex: 1; display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-.pill-name { font-size: 12.5px; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pill-sub { font-size: 10px; color: var(--muted); font-family: var(--mono); display: inline-flex; align-items: center; gap: 3px; }
-.chev { color: var(--muted); transition: transform 200ms ease; }
+.acct:hover, .acct.active { background: var(--active-bg); }
+.acct.rail { justify-content: center; padding: 8px 0; }
+.avatar {
+  width: 26px; height: 26px; flex-shrink: 0;
+  border-radius: 29px;
+  background: var(--brand-grad);
+  /* 设计稿指定的冷调外发光,与绿渐变形成一层薄雾 */
+  box-shadow: 0 0 0 3px rgba(47, 111, 208, 0.16);
+}
+.acct-main { flex: 1; display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.acct-name {
+  font-size: 14px; line-height: 17px; letter-spacing: -0.3125px;
+  color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chev { color: var(--muted); flex-shrink: 0; transition: transform 200ms ease; }
 .chev.flip { transform: rotate(180deg); }
+
+/* ── 设置浮层(设计稿 §2)──────────────────── */
+.pop-overlay { position: fixed; inset: 0; z-index: 300; }
+.setpop {
+  position: fixed;
+  width: 288px;
+  max-width: calc(100vw - 16px);
+  padding: 13px 12px;
+  display: flex; flex-direction: column; gap: 3px;
+  background: var(--panel);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+}
+html[data-theme="dark"] .setpop,
+html[data-theme="aurora-dark"] .setpop { box-shadow: var(--shadow-card), 0 0 0 1px var(--border-soft); }
+.set-row {
+  width: 100%;
+  height: 44px;
+  display: flex; align-items: center; gap: 5px;
+  padding: 11px 10px;
+  border: none; background: transparent;
+  border-radius: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.set-row.static { cursor: default; padding: 11px 5px; gap: 5px; }
+.set-row:not(.static):hover { background: var(--active-bg); }
+.set-row:not(.static):hover .set-lab { font-weight: 500; color: var(--text); }
+.set-row:not(.static):hover .set-ic { color: var(--text); }
+.set-row:disabled { cursor: default; opacity: 0.7; }
+.set-ic { color: var(--text-2); flex-shrink: 0; }
+.set-ic.spin { animation: spin 0.9s linear infinite; }
+.set-lab {
+  flex: 1; min-width: 0;
+  font-size: 16px; line-height: 19px; letter-spacing: -0.3125px;
+  color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.set-row.static .set-lab { flex: 0 0 auto; }
+.set-tail {
+  flex-shrink: 0; max-width: 108px;
+  font-size: 12px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.set-div { height: 1px; margin: 3px 6px; background: var(--border-soft); border-radius: 0.5px; }
+
+/* 外观分段控件:轨道中性灰,选中片白底 + 多层微阴影(设计稿 §2.3) */
+.seg {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 4px;
+  background: var(--active-bg);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.seg-i {
+  height: 31px;
+  padding: 0 8px;
+  border: none; background: transparent;
+  border-radius: 12px;
+  font-size: 14px; line-height: 19px; letter-spacing: -0.3125px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.seg-i.on {
+  background: var(--panel);
+  border-radius: 8px;
+  font-weight: 500;
+  color: var(--text);
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.03), -2px 0 2px rgba(0, 0, 0, 0.03),
+    4px 0 4px rgba(0, 0, 0, 0.03), 0 2px 2px rgba(0, 0, 0, 0.03);
+}
+
+/* 更新结果条(设计稿 §5.2):成功=绿渐变;发现新版/失败复用同一形状换底色 */
+.upd-toast {
+  position: fixed;
+  width: 288px;
+  max-width: calc(100vw - 16px);
+  min-height: 41px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 10px;
+  border-radius: 12px;
+  color: #fff;
+  background: var(--brand-grad);
+}
+.upd-toast.info { cursor: pointer; }
+.upd-toast.err { background: var(--vermilion); }
+.ut-text { flex: 1; font-size: 16px; line-height: 19px; letter-spacing: -0.3125px; }
+.ut-close {
+  width: 16px; height: 16px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  border: 1.3333px solid #fff; background: #fff;
+  color: #333; cursor: pointer; padding: 0;
+}
+
+/* 确认退出弹窗(设计稿 §4) */
+.exit-mask {
+  position: fixed; inset: 0; z-index: 320;
+  background: rgba(0, 0, 0, 0.59);
+  display: flex; align-items: center; justify-content: center;
+}
+.exit-box {
+  width: 514px; max-width: calc(100vw - 32px);
+  min-height: 180px;
+  padding: 28px 29px 22px;
+  display: flex; flex-direction: column;
+  background: var(--panel);
+  border-radius: 12px;
+}
+.exit-title { font-size: 18px; line-height: 22px; font-weight: 500; letter-spacing: -0.3125px; color: var(--text); }
+.exit-desc { margin-top: 15px; font-size: 16px; line-height: 19px; letter-spacing: -0.3125px; color: var(--text-2); }
+.exit-acts { margin-top: auto; padding-top: 24px; display: flex; justify-content: flex-end; gap: 15px; }
+.exit-btn {
+  width: 110px; height: 42px;
+  border-radius: 8px;
+  font-size: 18px; line-height: 22px; font-weight: 500; letter-spacing: -0.3125px;
+  cursor: pointer;
+}
+.exit-btn.ghost { border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
+.exit-btn.ghost:hover { background: var(--active-bg); }
+/* 主按钮用「实底反色」变量而非写死黑:深色模式下 --btn-solid-* 会自动翻面 */
+.exit-btn.solid {
+  border: 1px solid var(--btn-solid-bg);
+  background: var(--btn-solid-bg);
+  color: var(--btn-solid-text);
+}
+.exit-btn.solid:hover { opacity: 0.88; }
+
+.pop-fade-enter-active, .pop-fade-leave-active { transition: opacity 150ms ease; }
+.pop-fade-enter-active .setpop, .pop-fade-leave-active .setpop,
+.pop-fade-enter-active .upd-toast, .pop-fade-leave-active .upd-toast {
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease;
+  transform-origin: bottom left;
+}
+.pop-fade-enter-from, .pop-fade-leave-to { opacity: 0; }
+.pop-fade-enter-from .setpop, .pop-fade-leave-to .setpop,
+.pop-fade-enter-from .upd-toast, .pop-fade-leave-to .upd-toast { opacity: 0; transform: translateY(8px) scale(0.98); }
 
 .dock-overlay { position: fixed; inset: 0; z-index: 200; }
 .panel {

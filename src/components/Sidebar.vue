@@ -5,16 +5,14 @@ import {
   FileText,
   Sigma,
   Plus,
-  CloudDownload,
-  Stethoscope,
   Settings,
   PanelLeftClose,
   Pin,
   MoreHorizontal,
   Archive,
-  Puzzle,
   Sparkles,
   BookOpen,
+  MessageSquare,
 } from "@lucide/vue";
 import SearchGlass from "./icons/SearchGlass.vue";
 import { useAppStore } from "../stores/app";
@@ -27,27 +25,23 @@ import { MODE_ORDER, MODES, type TeachMode } from "../lib/teachSamples";
 const app = useAppStore();
 const chat = useChatStore();
 
-type NavItem = { key: typeof app.view; label: string; icon: any };
 // 三大功能（仿九章爱学左栏）：AI课件(PPT) / AI教案 / 生成数学课件。点一下切首页对应工坊。
+// chat（新建对话）是独立首项，不出现在工坊列表(MODE_ORDER)里，这里给个占位图标满足类型。
 const MODE_ICON: Record<TeachMode, any> = {
+  chat: Plus,
   ppt: Presentation,
   lesson: FileText,
   math: Sigma,
 };
 const functionItems = MODE_ORDER.map((m) => ({ mode: m, label: MODES[m].label, icon: MODE_ICON[m] }));
+// 导航同一时刻只能亮一项，靠 homeMode 区分：
+// 「新建对话」= homeMode 'chat'（通用助手首页），三个工坊各自 'ppt'/'lesson'/'math'。
 function pickMode(m: TeachMode) {
   app.setHomeMode(m);
 }
 
-// 工具类次要项收进「更多」（技能 / 更新 / 环境 / 设置），不占主区。
-const moreNav: NavItem[] = [
-  { key: "skill_center", label: "技能中心", icon: Puzzle },
-  { key: "update", label: "更新", icon: CloudDownload },
-  { key: "env_doctor", label: "环境", icon: Stethoscope },
-  { key: "settings", label: "设置", icon: Settings },
-];
-const showMore = ref(false);
-const moreActive = computed(() => moreNav.some((i) => i.key === app.view));
+// 「更多」= 精品推荐(技能中心，设计稿 6-更多精品推荐)，作直接导航项。
+// 「更新」「环境」已移入「设置」页内(见 Settings.vue)，不再挂侧栏。
 function pickNav(k: typeof app.view) {
   app.setView(k);
 }
@@ -60,9 +54,9 @@ onMounted(() => {
 async function newConv() {
   await app.newConversation();
 }
-// 「新建对话」大按钮：回到干净首页（保留当前工坊模式）开新的一份。
+// 「新建对话」：切到通用助手首页（chat 版式：居中问候 + 底部输入，无案例广场）。
 function startNew() {
-  app.setView("home");
+  app.setHomeMode("chat");
 }
 
 async function confirmDelete(c: Conversation) {
@@ -155,19 +149,19 @@ const sortedConvs = computed<Conversation[]>(() => {
       </button>
     </div>
 
-    <!-- 新建对话（大按钮，仿九章爱学「新建任务」）：回到干净首页开新的一份 -->
-    <button
-      class="new-task-btn"
-      :class="{ rail: app.sidebarCollapsed }"
-      title="新建对话"
-      @click="startNew()"
-    >
-      <Plus :size="app.sidebarCollapsed ? 18 : 17" :stroke-width="2.2" />
-      <span v-if="!app.sidebarCollapsed">新建对话</span>
-    </button>
-
-    <!-- Nav：三大功能（AI课件PPT / AI教案 / 生成数学课件）+ 知识库 -->
+    <!-- Nav（设计稿顺序）：新建对话 / AI 课件PPT / AI 教案 / 生成数学课件 / 知识库 / 更多 / 设置
+         —— 「新建对话」不再是蓝色大 CTA，而是与其它功能同规格的导航首项 -->
     <nav class="nav">
+      <button
+        class="nav-item fn"
+        :class="{ active: app.view === 'home' && app.homeMode === 'chat' }"
+        title="新建对话"
+        @click="startNew()"
+      >
+        <span class="glyph-icon"><Plus :size="24" :stroke-width="1.6" /></span>
+        <span v-if="!app.sidebarCollapsed" class="label">新建对话</span>
+      </button>
+
       <button
         v-for="it in functionItems"
         :key="it.mode"
@@ -177,7 +171,7 @@ const sortedConvs = computed<Conversation[]>(() => {
         @click="pickMode(it.mode)"
       >
         <span class="glyph-icon"
-          ><component :is="it.icon" :size="19" :stroke-width="1.7"
+          ><component :is="it.icon" :size="24" :stroke-width="1.6"
         /></span>
         <span v-if="!app.sidebarCollapsed" class="label">{{ it.label }}</span>
       </button>
@@ -189,48 +183,40 @@ const sortedConvs = computed<Conversation[]>(() => {
         @click="pickNav('wiki')"
       >
         <span class="glyph-icon"
-          ><BookOpen :size="19" :stroke-width="1.7"
+          ><BookOpen :size="24" :stroke-width="1.6"
         /></span>
         <span v-if="!app.sidebarCollapsed" class="label">知识库</span>
       </button>
 
-      <!-- 更多：技能中心 / 环境 / 设置 等次要项收纳于此（顶层更清爽） -->
+      <!-- 更多：直达精品推荐(技能中心)，与其它功能同规格（设计稿 6-更多精品推荐） -->
       <button
-        class="nav-item more"
-        :class="{ active: moreActive && !showMore, expanded: showMore }"
-        :title="'更多'"
-        @click="showMore = !showMore"
+        class="nav-item fn"
+        :class="{ active: app.view === 'skill_center' }"
+        title="更多"
+        @click="pickNav('skill_center')"
       >
         <span class="glyph-icon"
-          ><MoreHorizontal :size="19" :stroke-width="1.7"
+          ><MoreHorizontal :size="24" :stroke-width="1.6"
         /></span>
         <span v-if="!app.sidebarCollapsed" class="label">更多</span>
-        <span v-if="!app.sidebarCollapsed" class="more-chev">{{
-          showMore ? "▾" : "▸"
-        }}</span>
       </button>
 
-      <template v-if="showMore">
-        <button
-          v-for="it in moreNav"
-          :key="it.key"
-          class="nav-item sub"
-          :class="{ active: app.view === it.key }"
-          :title="it.label"
-          @click="pickNav(it.key)"
-        >
-          <span class="glyph-icon"
-            ><component :is="it.icon" :size="17" :stroke-width="1.7"
-          /></span>
-          <span v-if="!app.sidebarCollapsed" class="label">{{ it.label }}</span>
-        </button>
-      </template>
+      <!-- 设置：设计稿里与「更多」平级的顶层项 -->
+      <button
+        class="nav-item fn"
+        :class="{ active: app.view === 'settings' }"
+        title="设置"
+        @click="pickNav('settings')"
+      >
+        <span class="glyph-icon"><Settings :size="24" :stroke-width="1.6" /></span>
+        <span v-if="!app.sidebarCollapsed" class="label">设置</span>
+      </button>
     </nav>
 
     <!-- Conversations（扁平：不分项目，一条条对话按最近活跃排） -->
     <div v-if="!app.sidebarCollapsed" class="proj-section">
       <div class="proj-head">
-        <span class="proj-title">历史任务</span>
+        <span class="proj-title">历史对话</span>
         <button class="ic-btn plus" title="新建对话" @click="newConv()">+</button>
       </div>
 
@@ -253,6 +239,8 @@ const sortedConvs = computed<Conversation[]>(() => {
           :class="{ active: app.currentConvId === c.id, pinned: app.isPinned(c.id) }"
           @click="app.selectConversation(c)"
         >
+          <!-- 设计稿：每条对话前一枚 18px 白底圆 + 气泡图标 -->
+          <span class="cv-av"><MessageSquare :size="13" :stroke-width="1.1" /></span>
           <span
             v-if="app.unreadConvs.has(c.id)"
             class="cv-dot"
@@ -358,106 +346,48 @@ const sortedConvs = computed<Conversation[]>(() => {
   margin: 0 auto;
 }
 
-/* 新建对话大按钮（仿九章爱学「新建任务」蓝色主按钮） */
-.new-task-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin: 2px 4px 10px;
-  padding: 12px 14px;
-  border: none;
-  border-radius: 12px;
-  background: var(--primary, #3f6ef0);
-  color: #fff;
-  font-size: 16px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--primary, #3f6ef0) 30%, transparent);
-  transition: filter 0.14s, transform 0.1s;
-}
-.new-task-btn:hover {
-  filter: brightness(1.06);
-}
-.new-task-btn:active {
-  transform: translateY(1px);
-}
-.new-task-btn.rail {
-  margin: 2px auto 10px;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border-radius: 11px;
-}
-
+/* ── 导航（设计稿度量）：项高 44、padding 11/20、gap 12、radius 10、字 16px；
+      默认 #44444A w400，选中只换中性灰底 #E6E6E6 + #171717 w500，不再用品牌色淡底 ── */
 .nav {
   display: flex;
   flex-direction: column;
   gap: 3px;
-}
-/* 三大功能项：字号更大、图标更醒目（仿九章爱学左栏） */
-.nav-item.fn {
-  font-size: 16px;
-  font-weight: 600;
-  padding: 11px 12px;
-  border-radius: 10px;
-  gap: 12px;
-}
-.nav-item.fn .glyph-icon {
-  width: 22px;
-  color: var(--text-2);
-}
-.nav-item.fn.active {
-  background: color-mix(in srgb, var(--primary, #3f6ef0) 12%, transparent);
-  color: var(--primary, #3f6ef0);
-  border-left: none;
-  padding-left: 12px;
-  font-weight: 700;
-}
-.nav-item.fn.active .glyph-icon {
-  color: var(--primary, #3f6ef0);
+  padding: 0 12px;
 }
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
+  gap: 12px;
+  padding: 11px 20px;
+  height: 44px;
   border: none;
-  border-radius: 3px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: -0.3125px;
   text-align: left;
 }
 .nav-item:hover {
   background: var(--selection-bg);
 }
 .nav-item.active {
-  background: var(--selection-bg);
+  background: var(--active-bg);
   color: var(--text);
   font-weight: 500;
-  border-left: 2px solid var(--ink);
-  padding-left: 8px;
+}
+.nav-item .glyph-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--text-2);
+}
+.nav-item.active .glyph-icon {
+  color: var(--text);
 }
 .sb.collapsed .nav-item {
   justify-content: center;
-  padding: 7px 0;
-}
-.sb.collapsed .nav-item.active {
-  border-left: none;
-  border-right: 2px solid var(--ink);
-}
-/* 「更多」：与三大功能同一量级，别缩成一行小字被忽略掉 */
-.nav-item.more {
-  font-size: 16px;
-  font-weight: 600;
-  padding: 11px 12px;
-  border-radius: 10px;
-  gap: 12px;
-}
-.nav-item.more .glyph-icon {
-  width: 22px;
-  color: var(--text-2);
+  padding: 11px 0;
 }
 /* 「更多」展开态 + 折叠箭头 */
 .more-chev {
@@ -468,22 +398,16 @@ const sortedConvs = computed<Conversation[]>(() => {
 .nav-item.expanded {
   color: var(--text);
 }
-/* 「更多」里的次要项：缩进 + 字号略小，作为子级 */
+/* 「更多」里的次要项：缩进 + 字号降一档，作为子级 */
 .nav-item.sub {
-  padding-left: 30px;
-  padding-top: 9px;
-  padding-bottom: 9px;
-  font-size: 14px;
-  border-radius: 9px;
-  gap: 12px;
+  padding-left: 34px;
+  height: 40px;
+  font-size: 15px;
   color: var(--muted);
 }
-.nav-item.sub .glyph,
 .nav-item.sub .glyph-icon {
   width: 20px;
-}
-.nav-item.sub.active {
-  padding-left: 28px;
+  height: 20px;
 }
 .sb.collapsed .nav-item.sub {
   padding-left: 0;
@@ -510,10 +434,10 @@ const sortedConvs = computed<Conversation[]>(() => {
   flex: 1;
 }
 
+/* 历史对话区（设计稿 Frame 14）：与导航之间靠留白分区，不再拉分割线 */
 .proj-section {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-soft);
+  margin-top: 22px;
+  padding: 0 12px;
   overflow-y: auto;
   flex: 1;
 }
@@ -526,9 +450,9 @@ const sortedConvs = computed<Conversation[]>(() => {
 /* 「历史任务」是分区标签，不是第二主角：与功能栏同一无衬线字族，字号降一档、字距收敛，
    让视觉重量落在下面的对话行上（原来衬线 + 1.5px 字距与上方功能栏割裂） */
 .proj-title {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.3125px;
   color: var(--muted);
 }
 /* 团队项目分区(GitHub repo 列表式) */
@@ -614,20 +538,24 @@ const sortedConvs = computed<Conversation[]>(() => {
   color: var(--text);
 }
 
-/* 对话过滤框 */
+/* 对话过滤框（设计稿：245×32，实底 #E6E6E6，无描边） */
 .conv-filter {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 10px 10px;
+  gap: 5px;
+  margin: 0 0 15px;
   padding: 7px 10px;
-  border: 1px solid var(--border-soft);
+  height: 32px;
+  border: none;
   border-radius: 9px;
-  background: var(--bg-soft);
+  background: var(--active-bg);
 }
 .conv-filter .cf-ic {
   color: var(--dim);
   flex-shrink: 0;
+}
+.conv-filter .cf-ic {
+  color: var(--dim);
 }
 .conv-filter input {
   flex: 1;
@@ -636,6 +564,7 @@ const sortedConvs = computed<Conversation[]>(() => {
   outline: none;
   background: transparent;
   font-size: 13.5px;
+  letter-spacing: -0.112px;
   color: var(--text);
 }
 .conv-filter input::placeholder {
@@ -914,13 +843,33 @@ const sortedConvs = computed<Conversation[]>(() => {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 10px 9px 12px;
+  gap: 12px;
+  padding: 11px 10px;
+  height: 35px;
   font-size: 14px;
-  color: var(--text-2);
-  border-radius: 9px;
+  letter-spacing: -0.3125px;
+  color: var(--text);
+  border-radius: 10px;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
+}
+/* 对话行头像：18px 白底圆 + 细描边 + 灰气泡图标（设计稿 Frame 13） */
+.cv-av {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: 0.5px solid rgba(153, 153, 153, 0.44);
+  color: rgba(102, 102, 102, 0.54);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+html[data-theme="dark"] .cv-av {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--muted);
 }
 .conv:hover {
   background: var(--selection-bg);
@@ -936,11 +885,11 @@ const sortedConvs = computed<Conversation[]>(() => {
 .conv:hover .ca.delete {
   display: inline-flex;
 }
-/* 选中态与功能栏同源（主色淡底 + 主色字），不再是另一套灰底 */
+/* 选中态与导航同源：中性灰底 + 深字，无品牌色 */
 .conv.active {
-  background: color-mix(in srgb, var(--primary, #3f6ef0) 12%, transparent);
-  color: var(--primary, #3f6ef0);
-  font-weight: 600;
+  background: var(--active-bg);
+  color: var(--text);
+  font-weight: 500;
 }
 .cv-dot {
   width: 7px;

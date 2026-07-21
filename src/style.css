@@ -1,15 +1,17 @@
 /* ===== Polaris 墨蓝水墨主题 (v6 token, 沿用 PRD) ===== */
 :root {
-  --bg: #fafaf9;
-  --bg-soft: #f4f4f2;
+  /* 2026-07 设计稿复刻(Figma「css复刻版本」)：主区 #FAFAFA / 侧栏 #F2F2F2 /
+     选中态中性 #E6E6E6 —— 全局退成中性灰，品牌色只留给极少数强调点 */
+  --bg: #fafafa;
+  --bg-soft: #f2f2f2;
   --panel: #ffffff;
-  --panel-hover: #fafaf8;
+  --panel-hover: #fafafa;
 
   --border: #e3e2de;
   --border-soft: #edecea;
   --border-strong: #d2d1cc;
 
-  --text: #1a1a1c;
+  --text: #171717;
   --text-2: #44444a;
   --muted: #8a8a92;
   --dim: #b5b5bc;
@@ -19,6 +21,8 @@
 
   --selection-bg: #ebebe8;
   --selection-bg-hover: #e2e2df;
+  /* 设计稿选中态：导航/对话行/搜索框统一的中性灰底 */
+  --active-bg: #e6e6e6;
 
   --primary: #2c4661;
   --primary-soft: #e8edf3;
@@ -28,6 +32,16 @@
   --vermilion-soft: #fdeeec;
 
   --gold: #a78c4f;
+
+  /* ===== 设计稿主渐变（唯一强调色）=====
+     选中 chip / Tab / 主 CTA / 账号头像都用它；纯色版 --brand 给文字用 */
+  --brand-grad: linear-gradient(99.82deg, #10c8a6 9.27%, #70d573 88.19%);
+  --brand: #28b894;
+  --brand-glow: rgba(94, 211, 126, 0.23);
+  /* 快捷 chip / 用户气泡底 */
+  --chip-bg: #f3f3f4;
+  /* 卡片浮起阴影（设计稿全篇同一条） */
+  --shadow-card: 0px 2px 13.4px rgba(0, 0, 0, 0.07);
 
   /* 实底反色按钮（下载/安装/新建等 CTA）：浅色 = 墨底白字。
      不能直接写 var(--ink)+白字 —— 黑夜模式 --ink 翻浅会白底白字 */
@@ -53,9 +67,9 @@
      琉璃流光描边用于产物 chip 等边缘点缀（暖金调，若有似无） */
   /* 低视觉污染稿(2026-07 用户指定): 左右两侧退到近中性灰白、纯平无渐变,
      与主区只差一档明度靠色差分区; 暖黄味压到几乎不可察, 页面只剩内容有颜色 */
-  --bg-chat: #fdfdfb;
-  --bg-side: #f2f2ef;
-  --bg-side-mid: #f2f2ef;
+  --bg-chat: #fafafa;
+  --bg-side: #f2f2f2;
+  --bg-side-mid: #f2f2f2;
   --liuli-edge: linear-gradient(
     135deg,
     rgba(255, 255, 255, 0.85),
@@ -65,8 +79,9 @@
   );
 
   --serif: "Source Han Serif SC", "Noto Serif SC", STSong, "SimSun", serif;
-  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
-    "Segoe UI", Inter, sans-serif;
+  /* 设计稿全篇 Inter；中文回落到系统字族(Inter 无中文字形，不会串味) */
+  --sans: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Microsoft YaHei", "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", "SF Mono", "Consolas", monospace;
 }
 
@@ -162,6 +177,7 @@ a:hover {
 
   --selection-bg: rgba(255, 255, 255, 0.09);
   --selection-bg-hover: rgba(255, 255, 255, 0.13);
+  --active-bg: rgba(255, 255, 255, 0.13);
 
   --primary: #6a9bfa;
   --primary-soft: rgba(106, 155, 250, 0.14);
@@ -171,6 +187,12 @@ a:hover {
   --vermilion-soft: rgba(255, 107, 107, 0.12);
 
   --gold: #d4b06a;
+
+  --brand-grad: linear-gradient(99.82deg, #10c8a6 9.27%, #70d573 88.19%);
+  --brand: #3ddc97;
+  --brand-glow: rgba(94, 211, 126, 0.18);
+  --chip-bg: rgba(255, 255, 255, 0.07);
+  --shadow-card: 0 2px 14px rgba(0, 0, 0, 0.35);
 
   /* 实底按钮：仿 Codex —— 深色下用近白实底深字，hover 走 --primary */
   --btn-solid-bg: #e8e8e6;
@@ -276,10 +298,16 @@ html[data-theme="aurora-dark"] .sb {
   backdrop-filter: blur(28px) saturate(120%);
   -webkit-backdrop-filter: blur(28px) saturate(120%);
 }
-/* 框带多留一点缝，让画框更明显 */
+/* 框带多留一点缝，让画框更明显（默认主题已改成齐边平铺，圆角/顶部框带在这里加回来） */
+html[data-theme="aurora-light"] .shell,
+html[data-theme="aurora-dark"] .shell {
+  padding-top: 24px;
+  border-radius: 12px;
+}
 html[data-theme="aurora-light"] .main,
 html[data-theme="aurora-dark"] .main {
   margin: 12px;
+  border-radius: 12px;
 }
 /* 主内容面板：底保持不透明干净（软白 / 墨黑），只在外缘做「琉璃画框」——
    用 mask 渐变描边法画一圈跟随圆角的彩虹边 + 柔光 */

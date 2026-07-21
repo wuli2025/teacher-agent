@@ -25,8 +25,8 @@ const emit = defineEmits<{
   (e: "del", boxes: number[]): void;
   (e: "dup", box: number): void;
   (e: "z", box: number, dir: "up" | "down" | "top" | "bottom"): void;
-  /** 双击文本盒 → 请求父组件的点字直改(传真实 DOM 里的可编辑元素)。 */
-  (e: "text-edit", el: HTMLElement): void;
+  /** 点进文本/表格盒中间 → 请求父组件点字直改(传真实 DOM 可编辑元素与点击坐标)。 */
+  (e: "text-edit", el: HTMLElement, x: number, y: number): void;
 }>();
 
 const selSet = ref<number[]>([]);
@@ -106,6 +106,24 @@ type Drag = {
   nw?: { x: number; y: number; w: number; h: number };
   moved: boolean;
 };
+// ── 单击拖=排版 / 双击=改字 的自动识别 ──
+// 单击(含拖动)整盒任意位置都是排版:选中/移动/缩放,和平常拖排版的手感一致。
+// 双击文本/表格盒 → 直接改这里的字。图形/图片没字,双击不响应。
+/** 双击可改字的盒子(底下真元素带 [data-e])。 */
+const textish = (b: FreeBox) => ["text", "table"].includes(String(b?.type ?? ""));
+/** 正在改字的盒子:覆盖层让位(pointer-events:none),光标交给底下真元素。 */
+const editingIdx = ref<number | null>(null);
+function beginTextEdit(i: number, clientX: number, clientY: number) {
+  const hit = document
+    .elementsFromPoint(clientX, clientY)
+    .find((el) => el instanceof HTMLElement && el.matches("[data-e]")) as HTMLElement | undefined;
+  const host = realEl(i);
+  const el = hit ?? ((host?.matches?.("[data-e]") ? host : host?.querySelector("[data-e]")) as HTMLElement | null);
+  if (!el) return;
+  editingIdx.value = i;
+  emit("text-edit", el, clientX, clientY);
+  el.addEventListener("blur", () => { if (editingIdx.value === i) editingIdx.value = null; }, { once: true });
+}
 const drag = ref<Drag | null>(null);
 const rootEl = ref<HTMLElement | null>(null);
 /** 吸附对齐线(画布坐标;null=无)。 */
@@ -157,18 +175,28 @@ function applySnap(d: Drag, dx: number, dy: number): [number, number] {
 }
 
 function onBoxDown(i: number, e: MouseEvent) {
-  e.preventDefault(); // 防选中文字;副作用是焦点不再自动落过来 → 手动 focus,键盘操作才收得到
   e.stopPropagation();
-  rootEl.value?.focus();
   if (e.shiftKey) {
+    e.preventDefault();
+    rootEl.value?.focus();
     // Shift+点选:加/减选,不拖
     const at = selSet.value.indexOf(i);
     if (at >= 0) selSet.value.splice(at, 1);
     else selSet.value.push(i);
     return;
   }
+  e.preventDefault(); // 防选中文字;副作用是焦点不再自动落过来 → 手动 focus,键盘操作才收得到
+  rootEl.value?.focus();
   if (!selSet.value.includes(i)) selSet.value = [i]; // 点未选中的 → 单选它;点已选的 → 整组拖
   startDrag("move", i, undefined, e);
+}
+/** 双击文本/表格盒 → 进改字(光标落在双击处)。 */
+function onBoxDblClick(i: number, e: MouseEvent) {
+  e.stopPropagation();
+  if (!textish(props.boxes[i])) return;
+  e.preventDefault(); // 光标由父组件按点击坐标手动放置,防止浏览器默认行为搅局
+  selSet.value = [i];
+  beginTextEdit(i, e.clientX, e.clientY);
 }
 function onHandleDown(i: number, handle: string, e: MouseEvent) {
   e.preventDefault();
@@ -191,7 +219,8 @@ function onMove(e: MouseEvent) {
   const d = drag.value;
   if (!d) return;
   let [dx, dy] = toCanvas(e.clientX - d.startX, e.clientY - d.startY);
-  d.moved ||= Math.abs(dx) > 1 || Math.abs(dy) > 1;
+  // 阈值 3 画布 px:双击两下之间的手抖不算拖动(否则双击改字前会先发一次 1px 误移动)
+  d.moved ||= Math.abs(dx) > 3 || Math.abs(dy) > 3;
   if (d.kind === "move") {
     [dx, dy] = applySnap(d, dx, dy);
     d.dx = dx;
@@ -223,7 +252,7 @@ function onMove(e: MouseEvent) {
   }
   drag.value = { ...d };
 }
-function onUp() {
+function onUp(_e: MouseEvent) {
   window.removeEventListener("mousemove", onMove);
   const d = drag.value;
   drag.value = null;
@@ -234,7 +263,7 @@ function onUp() {
     const el = realEl(i);
     if (el) el.style.transform = "";
   }
-  if (!d.moved) return; // 纯点击:只选中,不发空操作
+  if (!d.moved) return; // 纯点击:只选中,不发空操作(双击才进改字)
   if (d.kind === "move") {
     if (d.dx || d.dy) emit("move", d.set, Math.round(d.dx), Math.round(d.dy));
   } else if (d.nw) {
@@ -331,21 +360,6 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
-function onDblClick(i: number, e: MouseEvent) {
-  e.stopPropagation();
-  // 按坐标穿透覆盖层找 [data-e]:表格要双击到哪格改哪格,多行文本要双击到哪行改哪行
-  const hit = document
-    .elementsFromPoint(e.clientX, e.clientY)
-    .find((el) => el instanceof HTMLElement && el.matches("[data-e]")) as HTMLElement | undefined;
-  if (hit) {
-    emit("text-edit", hit);
-    return;
-  }
-  const host = realEl(i);
-  const editable = (host?.matches?.("[data-e]") ? host : host?.querySelector("[data-e]")) as HTMLElement | null;
-  if (editable) emit("text-edit", editable);
-}
-
 const selBounds = computed(() => (sel.value !== null && props.boxes[sel.value] ? bounds(props.boxes[sel.value]) : null));
 </script>
 
@@ -356,12 +370,12 @@ const selBounds = computed(() => (sel.value !== null && props.boxes[sel.value] ?
       v-for="(b, i) in boxes"
       :key="i"
       class="ffe-box"
-      :class="{ on: selSet.includes(i), primary: sel === i }"
+      :class="{ on: selSet.includes(i), primary: sel === i, editing: editingIdx === i }"
       :style="liveStyle(i)"
-      @mousedown="onBoxDown(i, $event)"
-      @dblclick="onDblClick(i, $event)"
+      @mousedown="editingIdx === i ? null : onBoxDown(i, $event)"
+      @dblclick="editingIdx === i ? null : onBoxDblClick(i, $event)"
     >
-      <template v-if="sel === i && selSet.length === 1 && resizable(b) && !drag">
+      <template v-if="sel === i && selSet.length === 1 && resizable(b) && !drag && editingIdx !== i">
         <span v-for="h in ['nw','n','ne','e','se','s','sw','w']" :key="h" class="ffe-h" :class="h" @mousedown="onHandleDown(i, h, $event)" />
       </template>
     </div>
@@ -372,7 +386,7 @@ const selBounds = computed(() => (sel.value !== null && props.boxes[sel.value] ?
     <div v-if="marqueeStyle" class="ffe-marquee" :style="marqueeStyle" />
     <!-- 选中浮条:层级/复制/删除(贴着主选框上缘) -->
     <div
-      v-if="sel !== null && selBounds && !drag && !marquee"
+      v-if="sel !== null && selBounds && !drag && !marquee && editingIdx === null"
       class="ffe-bar"
       :style="{ left: pc(selBounds.x, 1280), top: `calc(${pc(selBounds.y, 720)} - 34px)` }"
       @mousedown.stop
@@ -398,6 +412,8 @@ const selBounds = computed(() => (sel.value !== null && props.boxes[sel.value] ?
 .ffe-box:hover { border-color: rgba(127, 168, 212, 0.6); }
 .ffe-box.on { border-color: var(--primary, #7fa8d4); }
 .ffe-box.primary { box-shadow: 0 0 0 1px rgba(127, 168, 212, 0.35); }
+/* 改字中:覆盖层让位,鼠标/光标穿透到底下真文字元素;不显手柄不显边框 */
+.ffe-box.editing { pointer-events: none; cursor: text; border-color: transparent; box-shadow: none; }
 .ffe-h { position: absolute; width: 9px; height: 9px; background: #fff; border: 1.5px solid var(--primary, #7fa8d4); border-radius: 2px; z-index: 2; }
 .ffe-h.nw { left: -5px; top: -5px; cursor: nwse-resize; }
 .ffe-h.n  { left: calc(50% - 4px); top: -5px; cursor: ns-resize; }

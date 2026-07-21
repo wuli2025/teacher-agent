@@ -9,7 +9,7 @@
 // 分两档是因为：200% DPI 屏全屏时大图会被拉到 2880 物理像素，单档 960 必糊；
 // 而缩略图条一次要加载十几张，用高清档纯属浪费。
 
-export type TeachMode = "ppt" | "lesson" | "math";
+export type TeachMode = "ppt" | "lesson" | "math" | "chat";
 
 export type Grade = "全部" | "小学" | "初中" | "高中" | "其他";
 
@@ -137,9 +137,22 @@ const LESSON_SAMPLES: TeachSample[] = withDecks([
 ]);
 
 export const MODES: Record<TeachMode, ModeDef> = {
+  // 「新建对话」= 通用智能助手：不注入课件技能、原样发问，首页为居中问候 + 底部输入（无案例广场）。
+  // 与三大工坊（ppt/lesson/math）是两种不同的首页版式（设计稿 1-新建对话主页 vs 2-AI课件PPT）。
+  chat: {
+    key: "chat",
+    label: "新建对话",
+    hero: "LUMI {你的智能助手}",
+    placeholder: "有什么问题都可以问我，或把文件拖进来一起看…",
+    badge: "对话",
+    skillIds: [],
+    goal: "",
+    buildPrompt: (t) => t,
+    samples: [],
+  },
   ppt: {
     key: "ppt",
-    label: "AI 课件（PPT）",
+    label: "AI 课件PPT",
     hero: "一句话生成{完整教学课件}",
     placeholder: "生成讲解一元二次方程的教学完整课件…（可拖文件进来作为素材）",
     badge: "AI 完整课件",

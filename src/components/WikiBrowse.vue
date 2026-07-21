@@ -826,8 +826,8 @@ function sendTableCmd() {
   position: relative;
 }
 .head {
-  padding: 26px 32px 0;
-  border-bottom: 1px solid var(--hairline);
+  padding: 30px 32px 0;
+  border-bottom: 1px solid var(--border-soft);
   display: grid;
   grid-template-columns: 1fr auto;
   grid-template-areas:
@@ -835,65 +835,62 @@ function sendTableCmd() {
     "tabs  tabs";
   align-items: baseline;
 }
+/* 页标题：设计稿区标题级 20/36 w800，不再用书法体大字距 */
 .title {
   grid-area: title;
-  font-family: var(--serif);
-  font-size: 21px;
-  letter-spacing: 4px;
+  font-size: 20px;
+  line-height: 36px;
+  letter-spacing: 0.05px;
   color: var(--ink);
-  font-weight: 600;
+  font-weight: 800;
 }
 .tabs {
   grid-area: tabs;
-  margin-top: 18px;
+  margin-top: 14px;
   display: flex;
   align-items: center;
-  gap: 26px;
+  gap: 10px;
 }
+/* Tab 改成稿面的 radius 8 胶囊：选中= 绿渐变实底白字，未选中= 无底中性字 */
 .tab {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 6px 16px;
+  margin-bottom: 10px;
   background: transparent;
   border: none;
-  padding: 8px 2px 12px;
-  color: var(--muted);
-  font-size: 13.5px;
-  letter-spacing: 1px;
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.23px;
   cursor: pointer;
-  transition: color 0.18s ease;
+  transition: background 0.18s ease, color 0.18s ease;
 }
-.tab::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  background: var(--ink);
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform 0.22s ease;
-}
-.tab:hover {
+.tab:hover:not(.active) {
+  background: var(--active-bg);
   color: var(--text);
 }
 .tab.active {
-  color: var(--ink);
-  font-weight: 600;
+  background: var(--brand-grad);
+  color: #fff;
+  font-weight: 700;
 }
-.tab.active::after {
-  transform: scaleX(1);
-}
+/* 图谱是并入的功能键，保持中性填充，不抢主强调色 */
 .tab-graph {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--muted);
-}
-.tab-graph::after {
-  background: var(--primary);
+  background: var(--active-bg);
+  color: var(--text-2);
 }
 .tab-graph:hover {
-  color: var(--primary);
+  background: var(--active-bg);
+  color: var(--text);
 }
 .root {
   grid-area: root;
@@ -1005,47 +1002,57 @@ function sendTableCmd() {
   grid-template-columns: repeat(3, 1fr);
   gap: 14px;
 }
+/* 卡片统一成稿面的白底 radius12 + 单一投影，去掉描边 */
 .card {
   background: var(--panel);
-  border: 1px solid var(--hairline);
-  border-radius: 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
   padding: 16px 18px;
+  box-shadow: var(--shadow-card);
 }
 .card-title {
-  font-family: var(--serif);
-  font-weight: 600;
-  font-size: 13.5px;
-  color: var(--text);
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 26px;
+  letter-spacing: 0.05px;
+  color: var(--ink);
   margin-bottom: 6px;
 }
 .card-body {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-2);
   line-height: 1.7;
 }
 
+/* 主 CTA = 页面唯一强调色 */
 .primary-btn {
   align-self: flex-start;
-  padding: 7px 16px;
-  background: var(--btn-solid-bg);
-  color: var(--btn-solid-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  background: var(--brand-grad);
+  color: #fff;
   border: none;
-  border-radius: 4px;
-  font-size: 12.5px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
-.primary-btn:hover {
-  background: var(--primary);
+.primary-btn:hover:not(:disabled) {
+  filter: brightness(1.04);
 }
 .muted {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .left {
-  border: 1px solid var(--hairline);
-  border-radius: 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
   padding: 10px;
   background: var(--panel);
+  box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1055,38 +1062,54 @@ function sendTableCmd() {
   min-height: 0;
 }
 .right {
-  border: 1px solid var(--hairline);
-  border-radius: 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
   padding: 22px 28px;
   overflow-y: auto;
   background: var(--panel);
+  box-shadow: var(--shadow-card);
 }
 .search-row {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 10px;
 }
+/* 全圆角搜索框（设计稿 260×36.5，这里在 320 栏内自适应宽度） */
 .search-row input {
   flex: 1;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  font-size: 12.5px;
-  background: var(--bg);
+  min-width: 0;
+  height: 36.5px;
+  padding: 9px 16px;
+  border: none;
+  border-radius: 1014px;
+  font-size: 14px;
+  letter-spacing: -0.15px;
+  color: var(--text);
+  background: var(--active-bg);
+}
+.search-row input::placeholder {
+  color: rgba(117, 117, 117, 0.45);
 }
 .search-row input:focus {
   outline: none;
-  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--brand);
 }
+/* 次级按钮：中性填充 + radius 8 */
 .btn {
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  border-radius: 3px;
-  font-size: 12.5px;
+  padding: 0 14px;
+  height: 36px;
+  border: none;
+  background: var(--active-bg);
+  color: var(--text-2);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
 }
 .btn:hover {
-  border-color: var(--primary);
+  filter: brightness(0.96);
 }
 
 .section-title {
@@ -1208,7 +1231,7 @@ function sendTableCmd() {
   margin-top: 8px;
 }
 .accent-card {
-  border-left: 3px solid var(--primary);
+  border-left: 3px solid var(--brand);
 }
 .primary-btn:disabled {
   opacity: 0.6;
@@ -1249,7 +1272,7 @@ function sendTableCmd() {
   margin-bottom: 8px;
 }
 .lint-summary b {
-  color: var(--primary);
+  color: var(--brand);
 }
 .lint-summary b.bad {
   color: var(--vermilion);
@@ -1347,20 +1370,21 @@ function sendTableCmd() {
   cursor: default;
 }
 
+/* 空态：14px 次级灰居中（稿面主区没画内容，按规格 §2 的推断实现） */
 .placeholder {
   height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--dim);
-  font-family: var(--serif);
-  letter-spacing: 1px;
+  color: var(--muted);
+  font-size: 14px;
+  letter-spacing: 0;
 }
 .ph-glyph {
   font-size: 40px;
   margin-bottom: 12px;
-  color: var(--border-strong);
+  color: var(--dim);
 }
 
 .md {
@@ -1404,7 +1428,7 @@ function sendTableCmd() {
   margin-left: 0;
 }
 .md :deep(a) {
-  color: var(--primary);
+  color: var(--brand);
 }
 
 .ingest-row {
@@ -1414,21 +1438,30 @@ function sendTableCmd() {
 }
 .ingest-row input {
   flex: 1;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  font-size: 12.5px;
-  background: var(--bg);
+  height: 36px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--active-bg);
   font-family: var(--mono);
+}
+.ingest-row input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--brand);
 }
 .ingest-msg {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
 }
 .empty {
-  padding: 20px 8px;
-  font-style: italic;
+  padding: 28px 8px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.7;
 }
 
 /* ─────────── 拖拽上传覆盖层 ─────────── */
@@ -1436,8 +1469,9 @@ function sendTableCmd() {
   position: absolute;
   inset: 10px;
   z-index: 50;
-  background: rgba(44, 70, 97, 0.07);
-  border: 2px dashed var(--primary);
+  /* 拖拽提示也归到唯一强调色（绿），不再用墨蓝 */
+  background: rgba(94, 211, 126, 0.1);
+  border: 2px dashed var(--brand);
   /* 黑夜模式见文件底部 html[data-theme="dark"] 覆盖 */
   border-radius: 14px;
   display: flex;
@@ -1451,12 +1485,11 @@ function sendTableCmd() {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  color: var(--primary);
+  color: var(--brand);
   text-align: center;
   padding: 0 24px;
 }
 .kb-drop-title {
-  font-family: var(--serif);
   font-size: 18px;
   font-weight: 600;
   letter-spacing: 1px;
@@ -1528,9 +1561,12 @@ function sendTableCmd() {
   }
 }
 
-/* 黑夜模式：拖拽覆盖层的浅蓝雾在深空底上隐形，换成主色蓝雾 */
+/* 黑夜模式：写死的浅色兜底 */
 html[data-theme="dark"] .kb-drop-overlay {
-  background: rgba(91, 140, 255, 0.12);
+  background: rgba(94, 211, 126, 0.14);
+}
+html[data-theme="dark"] .search-row input::placeholder {
+  color: var(--dim);
 }
 
 /* ═══════════ 全盘资源归集 · 琉璃牛轧糖(v4) ═══════════ */

@@ -71,7 +71,7 @@ function useDefault() {
   <div class="settings">
     <header class="head">
       <h1>设置</h1>
-      <p class="sub">配置 Polaris 工作台的本地路径与运行参数。</p>
+      <p class="sub">配置教师助手的外观、语音、软件更新与运行环境。</p>
     </header>
 
     <section class="block">
@@ -128,6 +128,26 @@ function useDefault() {
           </span>
           <span class="theme-name">极光琉璃 · 墨黑灰框</span>
         </button>
+      </div>
+    </section>
+
+    <section class="block">
+      <div class="b-title">软件更新</div>
+      <div class="b-desc">
+        检查是否有新版本；发现更新时可一键下载并安装（Windows 静默安装，安装后自动重启）。
+      </div>
+      <div class="row">
+        <button class="btn primary" @click="app.setView('update')">检查更新</button>
+      </div>
+    </section>
+
+    <section class="block">
+      <div class="b-title">运行环境</div>
+      <div class="b-desc">
+        检测 Claude Code / 依赖组件 / 沙箱等运行环境是否就绪，给出一键诊断与修复建议。
+      </div>
+      <div class="row">
+        <button class="btn primary" @click="app.setView('env_doctor')">打开环境检测</button>
       </div>
     </section>
 
@@ -225,12 +245,11 @@ function useDefault() {
   margin-bottom: 32px;
 }
 .head h1 {
-  font-family: var(--serif);
-  font-size: 22px;
-  font-weight: 500;
-  letter-spacing: 2px;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.05px;
   margin: 0 0 8px;
-  color: var(--ink);
+  color: var(--text);
 }
 .head .sub {
   font-size: 12.5px;
@@ -241,11 +260,11 @@ function useDefault() {
 
 .block {
   background: var(--panel);
-  border: 1px solid var(--hairline);
-  border-radius: 2px;
+  border: none;
+  border-radius: 14px;
   padding: 22px 24px;
-  margin-bottom: 22px;
-  box-shadow: var(--shadow-sm);
+  margin-bottom: 18px;
+  box-shadow: var(--shadow-card);
 }
 .block.muted {
   background: transparent;
@@ -253,11 +272,10 @@ function useDefault() {
   border-color: var(--border-soft);
 }
 .b-title {
-  font-family: var(--serif);
-  font-size: 14.5px;
-  font-weight: 600;
-  color: var(--ink);
-  letter-spacing: 1.2px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0;
   margin-bottom: 6px;
 }
 .b-title.sm {
@@ -315,13 +333,13 @@ function useDefault() {
 }
 
 .btn {
-  padding: 8px 14px;
+  padding: 8px 16px;
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: 8px;
   color: var(--text-2);
-  font-size: 12.5px;
-  letter-spacing: 0.5px;
+  font-size: 13px;
+  letter-spacing: 0.3px;
   cursor: pointer;
 }
 .btn:hover:not(:disabled) {
@@ -333,13 +351,12 @@ function useDefault() {
   cursor: not-allowed;
 }
 .btn.primary {
-  background: var(--btn-solid-bg);
-  color: var(--btn-solid-text);
-  border-color: var(--btn-solid-bg);
+  background: var(--brand-grad);
+  color: #fff;
+  border: none;
 }
 .btn.primary:hover:not(:disabled) {
-  background: var(--primary);
-  border-color: var(--primary);
+  filter: brightness(0.96);
 }
 
 .link-btn {
@@ -380,8 +397,8 @@ function useDefault() {
   border-color: var(--border-strong);
 }
 .theme-card.active {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px var(--primary-soft);
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px var(--brand-glow);
 }
 .theme-swatch {
   display: flex;
@@ -495,7 +512,7 @@ function useDefault() {
   letter-spacing: 0.5px;
 }
 .theme-card.active .theme-name {
-  color: var(--primary);
+  color: var(--brand);
   font-weight: 600;
 }
 

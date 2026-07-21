@@ -5,7 +5,7 @@ import { useAppStore } from "../stores/app";
 import { useChatStore } from "../stores/chat";
 import { chat as chatApi, artifacts, invoke, listen, isTauri, type AttachedFile } from "../tauri";
 import { useFileDrop } from "../composables/useFileDrop";
-import { MODES, GRADES, subjectOf, subjectsOf, type Grade, type TeachSample } from "../lib/teachSamples";
+import { MODES, GRADES, subjectOf, subjectsOf, type Grade, type TeachMode, type TeachSample } from "../lib/teachSamples";
 import { toast } from "../composables/useToast";
 
 // KeepAlive 友好命名（虽然 Home 很轻，保持一致）
@@ -15,18 +15,27 @@ const app = useAppStore();
 const chat = useChatStore();
 
 const mode = computed(() => MODES[app.homeMode]);
+// 「新建对话」通用助手首页 = chat 版式（居中问候 + 底部输入，无案例广场），
+// 与三大工坊（左标题 + 案例广场）是两种不同版式（设计稿 1-新建对话主页 vs 2-AI课件PPT）。
+const isChat = computed(() => app.homeMode === "chat");
 
-// hero 大标题：{高亮词} 拆分渲染
-const heroParts = computed(() => {
-  const s = mode.value.hero;
-  const m = s.match(/^(.*)\{(.+)\}(.*)$/);
-  if (!m) return [{ t: s, hi: false }];
-  return [
-    { t: m[1], hi: false },
-    { t: m[2], hi: true },
-    { t: m[3], hi: false },
-  ];
-});
+// 设计稿里三个工坊共用同一句欢迎语「LUMI 你的智能助手」，
+// 工坊差异只体现在导航高亮、输入占位与范例库上，标题不再随模式变。
+
+// 欢迎语下方的快捷建议 chip（文案取自设计稿）。
+// 点一下：切到对应工坊 + 预填提示词，用户可直接回车生成。
+const QUICK: { text: string; mode?: TeachMode; prompt?: string }[] = [
+  { text: "分析这份报告主要内容", prompt: "分析这份报告的主要内容，提炼要点与结论。" },
+  { text: "写一份PPT", mode: "ppt" },
+  { text: "帮我写一份教案", mode: "lesson" },
+  { text: "生成数学课件", mode: "math" },
+];
+function useQuick(q: (typeof QUICK)[number]) {
+  if (q.mode) app.setHomeMode(q.mode);
+  input.value = q.prompt ?? "";
+  autoGrow();
+  inputEl.value?.focus();
+}
 
 // 吉祥物图缺失时（打包漏带 / 文件被删）回退到原来的渐变圆球，hero 不塌成空洞
 const mascotOk = ref(true);
@@ -117,6 +126,8 @@ const canSend = computed(() => (input.value.trim().length > 0 || uploads.value.l
 
 /** 从提示词/附件名里提取课程名，给左栏对话起名（如「找春天 · 课件」）。提不出返回空串。 */
 function deriveConvTitle(text: string, m: (typeof MODES)[keyof typeof MODES]): string {
+  // 通用对话不追加「· 课件/教案」后缀，交给默认命名。
+  if (m.key === "chat") return "";
   let topic =
     text.match(/《([^》]{1,24})》/)?.[1] ??
     text.match(/'([^']{2,32})'/)?.[1] ??
@@ -351,23 +362,26 @@ function onCoverErr(e: Event, s: TeachSample) {
 </script>
 
 <template>
-  <div class="home-scroll">
-    <div class="home">
-      <!-- Hero -->
-      <div class="hero-block">
-        <img class="hero-mascot" src="/mascot/mascot.png" alt="" @error="mascotOk = false" v-show="mascotOk" />
-        <div v-if="!mascotOk" class="hero-orb"></div>
-        <h1 class="hero-title">
-          <template v-for="(p, i) in heroParts" :key="i">
-            <span :class="{ hi: p.hi }">{{ p.t }}</span>
-          </template>
-        </h1>
+  <div class="home-scroll" :class="{ chat: isChat }">
+    <div class="home" :class="{ chat: isChat }">
+      <!-- Hero：chat 版式居中问候（设计稿 1-新建对话主页），工坊版式左对齐标题（2-AI课件PPT） -->
+      <div class="hero-block" :class="{ center: isChat }">
+        <h1 class="hero-title">LUMI 你的智能助手</h1>
       </div>
 
+      <!-- 快捷建议 chip：设计稿里位于欢迎语下方、输入框上方 -->
+      <div class="quick-chips" :class="{ center: isChat }">
+        <button v-for="q in QUICK" :key="q.text" class="qc" @click="useQuick(q)">
+          {{ q.text }}
+        </button>
+      </div>
+
+      <!-- 输入卡 + 覆在右上角外沿探头的吉祥物（设计稿：LUMI 猫形机器人从输入框上沿探出，chat/工坊两版式共用） -->
+      <div class="composer-wrap">
+        <img class="composer-mascot" src="/mascot/mascot.png" alt="" @error="mascotOk = false" v-show="mascotOk" />
       <!-- 干净输入框（附件 / 图片 / 话筒 / 发送） -->
       <div class="composer" :class="{ busy }">
         <div class="composer-top">
-          <span class="mode-badge">{{ mode.badge }}</span>
           <textarea
             ref="inputEl"
             v-model="input"
@@ -407,14 +421,17 @@ function onCoverErr(e: Event, s: TeachSample) {
               <span v-if="dictating" class="mic-ping"></span>
             </button>
             <button class="send" :disabled="!canSend" title="生成 (Enter)" @click="generate">
-              <Loader v-if="busy" :size="18" class="spin" />
-              <Send v-else :size="18" :stroke-width="1.8" />
+              <Loader v-if="busy" :size="19" class="spin" />
+              <Send v-else :size="19" :stroke-width="1.8" />
             </button>
           </div>
         </div>
       </div>
+      </div>
+      <!-- /composer-wrap -->
 
-      <!-- 案例区：标题 + 年级 tab + 搜索 -->
+      <!-- 案例区（仅工坊模式；「新建对话」通用助手首页不展示案例广场）：标题 + 年级 tab + 搜索 -->
+      <template v-if="!isChat">
       <div class="lib-title-row">
         <h2 class="lib-title">案例广场</h2>
         <span class="lib-hint">真实生成的完整课件 · 点开逐页看 · 一键做同款</span>
@@ -490,6 +507,7 @@ function onCoverErr(e: Event, s: TeachSample) {
         </div>
         <div v-if="!filteredSamples.length" class="lib-empty">该分类下暂无范例</div>
       </div>
+      </template>
     </div>
 
     <!-- 课件逐页预览弹窗 -->
@@ -575,108 +593,108 @@ function onCoverErr(e: Event, s: TeachSample) {
   overflow-y: auto;
   background: var(--bg-chat);
 }
+/* chat 版式：让滚动容器成为纵向弹性列，好让首页整块撑满高度、输入卡沉底 */
+.home-scroll.chat {
+  display: flex;
+  flex-direction: column;
+}
 .home {
   position: relative;
-  max-width: 1120px;
+  max-width: 1056px;
   margin: 0 auto;
-  padding: 40px 32px 80px;
+  padding: 40px 24px 80px;
 }
-/* 页顶两团同源紫雾：给 hero 的光一点「空气」，往下自然回素底 */
-.home::before {
-  content: "";
-  position: absolute;
-  top: -140px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(960px, 92%);
-  height: 520px;
-  background:
-    radial-gradient(closest-side at 36% 38%, color-mix(in srgb, var(--primary, #6a5cff) 9%, transparent) 0%, transparent 70%),
-    radial-gradient(closest-side at 68% 26%, color-mix(in srgb, var(--primary, #6a5cff) 6%, transparent) 0%, transparent 72%);
-  pointer-events: none;
-  z-index: 0;
+/* chat 版式（新建对话通用助手，设计稿 1-新建对话主页）：纵向铺满，问候居中、输入卡沉到底部。
+   用 flex:1 + min-height:0 撑满滚动容器高度（min-height:100% 在 flex 链里不稳定，故改此法）。 */
+.home.chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 24px 30px;
 }
-.home > * {
-  position: relative;
-  z-index: 1;
+.home.chat .hero-block {
+  margin-top: auto;
+}
+.home.chat .composer-wrap {
+  margin-top: auto;
 }
 
-/* ── Hero ── */
+/* ── Hero：工坊版式标题左对齐；chat 版式居中问候 ── */
 .hero-block {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 18px;
-  padding: 26px 0 30px;
+  padding: 10px 0 0;
 }
-.hero-block::before {
-  content: "";
+.hero-block.center {
+  text-align: center;
+}
+/* ── 输入卡包裹 + 从右上角外沿探头的吉祥物（LUMI 猫形机器人）──
+   吉祥物落在输入卡之下（z-index:0），白色底座被卡片盖住，只露出探头。
+   图片白底≈#fafafa，四周与页面自然融合。 */
+.composer-wrap {
+  position: relative;
+}
+.composer-mascot {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 560px;
-  height: 260px;
-  transform: translate(-50%, -52%);
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--primary, #6a5cff) 14%, transparent) 0%, transparent 72%);
-  pointer-events: none;
-}
-/* 卡通吉祥物：hero 的主视觉，比原来的小圆球更有存在感 */
-.hero-mascot {
-  width: 76px;
-  height: 76px;
+  right: 24px;
+  bottom: calc(100% - 26px);
+  width: 118px;
+  height: 118px;
   object-fit: contain;
-  flex-shrink: 0;
-  filter: drop-shadow(0 10px 26px color-mix(in srgb, var(--primary, #6a5cff) 30%, transparent));
-}
-.hero-orb {
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 32%,
-    color-mix(in srgb, var(--primary, #6a5cff) 45%, #fff) 0%,
-    var(--primary, #6a5cff) 58%,
-    color-mix(in srgb, var(--primary, #6a5cff) 78%, #1e1b4b) 100%);
-  box-shadow: 0 10px 32px -6px color-mix(in srgb, var(--primary, #6a5cff) 45%, transparent);
-  flex-shrink: 0;
+  object-position: center bottom;
+  z-index: 0;
+  pointer-events: none;
+  user-select: none;
 }
 .hero-title {
-  font-size: 40px;
-  font-weight: 800;
-  letter-spacing: 1px;
+  font-size: 30px;
+  line-height: 44px;
+  font-weight: 600;
+  letter-spacing: 0.063px;
   margin: 0;
   color: var(--text);
-  font-family: var(--serif, inherit);
-}
-/* 高亮词：同源三站渐变（深→本色→浅），不引第二色相 */
-.hero-title .hi {
-  background: linear-gradient(98deg,
-    color-mix(in srgb, var(--primary, #6a5cff) 85%, #1e1b4b) 0%,
-    var(--primary, #6a5cff) 48%,
-    color-mix(in srgb, var(--primary, #6a5cff) 55%, #fff) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
 }
 
-/* ── 输入框：边框退后，聚焦时软光环托起 ── */
+/* ── 快捷建议 chip（欢迎语下方一行） ── */
+.quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin: 22px 0 26px;
+}
+.quick-chips.center {
+  justify-content: center;
+}
+.qc {
+  height: 45px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 12px;
+  background: var(--chip-bg);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 0.063px;
+  cursor: pointer;
+  transition: background 0.14s;
+}
+.qc:hover {
+  background: var(--active-bg);
+}
+
+/* ── 输入卡（设计稿）：纯白、18px 圆角、无描边，只用一层绿色辉光托住 ── */
 .composer {
-  border: 1px solid color-mix(in srgb, var(--primary, #6a5cff) 30%, var(--border-soft));
+  position: relative;
+  z-index: 1;
+  border: none;
   border-radius: 18px;
   background: var(--panel);
   padding: 18px 18px 12px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.65),
-    0 1px 2px rgba(20, 18, 40, 0.04),
-    0 14px 44px -14px color-mix(in srgb, var(--primary, #6a5cff) 20%, transparent);
-  transition: border-color 0.2s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+  box-shadow: 0 2px 13.4px var(--brand-glow);
+  transition: box-shadow 0.2s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .composer:focus-within {
-  border-color: color-mix(in srgb, var(--primary, #6a5cff) 55%, transparent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.65),
-    0 0 0 3px color-mix(in srgb, var(--primary, #6a5cff) 10%, transparent),
-    0 18px 52px -14px color-mix(in srgb, var(--primary, #6a5cff) 26%, transparent);
+  box-shadow: 0 2px 20px var(--brand-glow);
 }
 .composer.busy {
   opacity: 0.85;
@@ -686,17 +704,6 @@ function onCoverErr(e: Event, s: TeachSample) {
   align-items: flex-start;
   gap: 12px;
 }
-.mode-badge {
-  flex-shrink: 0;
-  margin-top: 2px;
-  padding: 6px 14px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--primary, #6a5cff) 12%, transparent);
-  color: var(--primary, #6a5cff);
-  font-size: 15px;
-  font-weight: 700;
-  white-space: nowrap;
-}
 .composer textarea {
   flex: 1;
   border: none;
@@ -705,8 +712,9 @@ function onCoverErr(e: Event, s: TeachSample) {
   background: transparent;
   color: var(--text);
   font-size: 17px;
-  line-height: 1.6;
-  min-height: 30px;
+  line-height: 27px;
+  letter-spacing: -0.432px;
+  min-height: 31px;
   max-height: 220px;
   font-family: inherit;
 }
@@ -773,14 +781,14 @@ function onCoverErr(e: Event, s: TeachSample) {
   color: var(--text);
 }
 .cb-ic.mic.live {
-  color: var(--primary, #6a5cff);
-  background: color-mix(in srgb, var(--primary, #6a5cff) 14%, transparent);
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
 }
 .mic-ping {
   position: absolute;
   inset: -2px;
   border-radius: 11px;
-  border: 2px solid var(--primary, #6a5cff);
+  border: 2px solid var(--brand);
   animation: micp 1s ease-out infinite;
 }
 @keyframes micp {
@@ -795,30 +803,26 @@ function onCoverErr(e: Event, s: TeachSample) {
   color: var(--muted);
   margin-left: 6px;
 }
+/* 发送键（设计稿）：35px 圆钮 —— 空输入时灰 #ADADAD，有内容才亮成绿渐变 */
 .send {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
+  width: 35px;
+  height: 35px;
+  border-radius: 22px;
   border: none;
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--primary, #6a5cff) 84%, #fff) 0%,
-    var(--primary, #6a5cff) 55%,
-    color-mix(in srgb, var(--primary, #6a5cff) 90%, #000) 100%);
+  background: var(--brand-grad);
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--primary, #6a5cff) 45%, transparent);
-  transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.16s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.16s;
+  transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.16s;
 }
 .send:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 10px 24px -8px color-mix(in srgb, var(--primary, #6a5cff) 55%, transparent);
 }
 .send:disabled {
-  background: var(--border);
-  color: var(--dim);
+  background: #adadad;
+  color: #fff;
   cursor: not-allowed;
 }
 .spin {
@@ -833,14 +837,15 @@ function onCoverErr(e: Event, s: TeachSample) {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  margin: 56px 0 0;
+  margin: 48px 0 0;
 }
 .lib-title {
   font-size: 20px;
+  line-height: 36px;
   font-weight: 800;
-  color: var(--text);
+  color: var(--ink);
   margin: 0;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.051px;
 }
 .lib-hint {
   font-size: 13px;
@@ -859,13 +864,17 @@ function onCoverErr(e: Event, s: TeachSample) {
   gap: 6px;
   flex-wrap: wrap;
 }
+/* 学段 chip（设计稿）：选中= 绿渐变实底白字 700，未选中= 无底 500 #44444A */
 .gt {
   border: none;
   background: transparent;
   color: var(--text-2);
   font-size: 15px;
+  line-height: 18px;
   font-weight: 500;
+  letter-spacing: -0.234px;
   padding: 6px 12px;
+  height: 30px;
   border-radius: 8px;
   cursor: pointer;
   transition: color 0.14s, background 0.14s;
@@ -874,45 +883,49 @@ function onCoverErr(e: Event, s: TeachSample) {
   background: var(--selection-bg);
 }
 .gt.on {
-  color: var(--primary, #6a5cff);
+  background: var(--brand-grad);
+  color: #fff;
   font-weight: 700;
-  background: color-mix(in srgb, var(--primary, #6a5cff) 10%, transparent);
 }
-/* 学科 tab：年级是主筛选，学科次一级 —— 用描边胶囊而非实底，避免两行 tab 在视觉上打架 */
+/* 学科 chip：次一级筛选，选中只换绿字，不加底 —— 避免两行 chip 打架 */
 .subject-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: -6px 0 18px;
+  margin: -2px 0 18px;
 }
 .sjt {
-  border: 1px solid var(--border-soft);
+  border: none;
   background: transparent;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 4px 12px;
-  border-radius: 999px;
+  color: color-mix(in srgb, var(--text-2) 62%, transparent);
+  font-size: 15px;
+  line-height: 18px;
+  font-weight: 400;
+  letter-spacing: -0.234px;
+  padding: 6px 12px;
+  height: 32px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: color 0.14s, background 0.14s, border-color 0.14s;
+  transition: color 0.14s, background 0.14s;
 }
 .sjt:hover {
   color: var(--text);
-  border-color: var(--border);
+  background: var(--selection-bg);
 }
 .sjt.on {
-  color: var(--primary, #6a5cff);
-  border-color: color-mix(in srgb, var(--primary, #6a5cff) 40%, transparent);
-  background: color-mix(in srgb, var(--primary, #6a5cff) 8%, transparent);
+  color: var(--brand);
+  font-weight: 500;
 }
+/* 主区搜索框：260 宽全圆角实底，无描边 */
 .lib-search {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
   padding: 9px 16px;
+  height: 36.5px;
   border-radius: 999px;
-  background: var(--bg-soft, var(--selection-bg));
-  border: 1px solid var(--border-soft);
+  background: var(--active-bg);
+  border: none;
   color: var(--muted);
   min-width: 260px;
 }
@@ -921,36 +934,39 @@ function onCoverErr(e: Event, s: TeachSample) {
   outline: none;
   background: transparent;
   font-size: 14px;
+  letter-spacing: -0.15px;
   color: var(--text);
   flex: 1;
 }
+.lib-search input::placeholder {
+  color: rgba(117, 117, 117, 0.45);
+}
 
 /* ── 案例卡片网格 ── */
+/* 设计稿：3 列固定网格，卡片 radius 14、白底 + 一层柔投影（不描边） */
 .sample-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 20px;
 }
 .sample-card {
   text-align: left;
-  border: 1px solid var(--border-soft);
+  border: none;
   border-radius: 14px;
   background: var(--panel);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
   cursor: pointer;
   padding: 0;
-  transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.2s cubic-bezier(0.32, 0.72, 0, 1), border-color 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+  transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.2s cubic-bezier(0.32, 0.72, 0, 1);
 }
-/* 反馈落在边框与投影上，封面截图保持安静（不缩放） */
+/* 反馈落在投影上，封面截图保持安静（不缩放） */
 .sample-card:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--primary, #6a5cff) 26%, var(--border-soft));
-  box-shadow:
-    0 2px 6px rgba(20, 18, 40, 0.05),
-    0 20px 48px -18px color-mix(in srgb, var(--primary, #6a5cff) 22%, rgba(20, 18, 40, 0.4));
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.1);
 }
 .sample-card:focus-visible {
-  outline: 2px solid var(--primary, #6a5cff);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
 .sc-cover {
@@ -1010,7 +1026,7 @@ function onCoverErr(e: Event, s: TeachSample) {
   padding: 7px 16px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.92);
-  color: var(--primary, #6a5cff);
+  color: var(--brand);
   font-size: 13px;
   font-weight: 700;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
@@ -1027,8 +1043,10 @@ function onCoverErr(e: Event, s: TeachSample) {
 }
 .sc-title {
   font-size: 15px;
+  line-height: 27px;
   font-weight: 700;
-  color: var(--text);
+  letter-spacing: -0.234px;
+  color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1040,28 +1058,27 @@ function onCoverErr(e: Event, s: TeachSample) {
   margin-top: 5px;
   min-width: 0;
 }
-/* 学科签名与「做同款」默认收灰，卡片被注视（hover）时才亮 —— 一屏只有一处紫 */
+/* 学科 chip：灰底小标签（设计稿 12/600 #44444A on #EBEBE8） */
 .sc-by {
   flex-shrink: 0;
   font-size: 12px;
+  line-height: 21px;
   font-weight: 600;
   color: var(--text-2);
   background: var(--selection-bg);
   padding: 1px 7px;
   border-radius: 6px;
-  transition: color 0.16s cubic-bezier(0.32, 0.72, 0, 1), background 0.16s cubic-bezier(0.32, 0.72, 0, 1);
-}
-.sample-card:hover .sc-by {
-  color: var(--primary, #6a5cff);
-  background: color-mix(in srgb, var(--primary, #6a5cff) 10%, transparent);
 }
 .sc-sub {
   font-size: 13px;
+  line-height: 23px;
+  letter-spacing: -0.076px;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 「做同款」：常态描边幽灵胶囊，卡片被注视时才亮成绿渐变 —— 一屏只有一处彩色 */
 .sc-same {
   flex-shrink: 0;
   display: inline-flex;
@@ -1071,6 +1088,7 @@ function onCoverErr(e: Event, s: TeachSample) {
   background: transparent;
   color: var(--muted);
   font-size: 12px;
+  line-height: 15px;
   font-weight: 700;
   padding: 5px 10px;
   border-radius: 999px;
@@ -1078,12 +1096,8 @@ function onCoverErr(e: Event, s: TeachSample) {
   transition: background 0.16s cubic-bezier(0.32, 0.72, 0, 1), color 0.16s cubic-bezier(0.32, 0.72, 0, 1), border-color 0.16s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .sample-card:hover .sc-same {
-  border-color: color-mix(in srgb, var(--primary, #6a5cff) 35%, transparent);
-  color: var(--primary, #6a5cff);
-}
-.sc-same:hover:not(:disabled) {
-  background: var(--primary, #6a5cff);
-  border-color: var(--primary, #6a5cff);
+  background: var(--brand-grad);
+  border-color: transparent;
   color: #fff;
 }
 .sc-same:disabled {
@@ -1155,8 +1169,8 @@ function onCoverErr(e: Event, s: TeachSample) {
 .pv-tag {
   font-size: 12px;
   font-weight: 600;
-  color: var(--primary, #6a5cff);
-  background: color-mix(in srgb, var(--primary, #6a5cff) 10%, transparent);
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
   padding: 2px 8px;
   border-radius: 999px;
 }
@@ -1174,9 +1188,9 @@ function onCoverErr(e: Event, s: TeachSample) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid color-mix(in srgb, var(--primary, #6a5cff) 35%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent);
   background: transparent;
-  color: var(--primary, #6a5cff);
+  color: var(--brand);
   font-size: 12.5px;
   font-weight: 700;
   padding: 6px 13px;
@@ -1185,7 +1199,7 @@ function onCoverErr(e: Event, s: TeachSample) {
   transition: background 0.14s, color 0.14s;
 }
 .pv-fs:hover {
-  background: var(--primary, #6a5cff);
+  background: var(--brand-grad);
   color: #fff;
 }
 .pv-x {
@@ -1208,7 +1222,7 @@ function onCoverErr(e: Event, s: TeachSample) {
 }
 .pv-stage {
   position: relative;
-  background: color-mix(in srgb, var(--primary, #6a5cff) 9%, #12101c);
+  background: #12101c;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1303,7 +1317,7 @@ function onCoverErr(e: Event, s: TeachSample) {
 }
 .pv-thumb.on {
   opacity: 1;
-  border-color: var(--primary, #6a5cff);
+  border-color: var(--brand);
 }
 .pv-foot {
   display: flex;
@@ -1343,12 +1357,12 @@ function onCoverErr(e: Event, s: TeachSample) {
 }
 .pv-btn.primary {
   border: none;
-  background: var(--primary, #6a5cff);
+  background: var(--brand-grad);
   color: #fff;
 }
 .pv-btn.primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  background: color-mix(in srgb, var(--primary, #6a5cff) 88%, #000);
+  filter: brightness(0.95);
 }
 .pv-btn.primary:disabled {
   opacity: 0.7;
