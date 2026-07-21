@@ -20,7 +20,7 @@ import VoiceOverlay from "./components/VoiceOverlay.vue";
 import CommandPalette from "./components/CommandPalette.vue";
 import TaskCenter from "./components/TaskCenter.vue";
 import FaultBoundary from "./components/FaultBoundary.vue";
-import { PanelLeftOpen } from "@lucide/vue";
+import PanelToggle from "./components/icons/PanelToggle.vue";
 import { useHotkeys } from "./composables/useHotkeys";
 import { installMarkdownDelegation } from "./lib/markdown";
 import { openUrl, onWsStatus, isTauri, files as fc } from "./tauri";
@@ -368,7 +368,7 @@ function startSbDrag(e: MouseEvent) {
           title="展开侧栏 (Ctrl+B)"
           @click="app.toggleSidebar()"
         >
-          <PanelLeftOpen :size="16" :stroke-width="1.7" />
+          <PanelToggle :size="16" :stroke-width="1.7" />
         </button>
       </Transition>
       <!-- 重视图(图谱/沙箱)用 KeepAlive 缓存：第一次进算一次，之后切走再回来瞬开，

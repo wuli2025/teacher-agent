@@ -1,20 +1,18 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from "vue";
-import {
-  Presentation,
-  FileText,
-  Sigma,
-  Plus,
-  Settings,
-  PanelLeftClose,
-  Pin,
-  MoreHorizontal,
-  Archive,
-  Sparkles,
-  BookOpen,
-  MessageSquare,
-} from "@lucide/vue";
+import { Pin, MoreHorizontal, Archive, Sparkles } from "@lucide/vue";
 import SearchGlass from "./icons/SearchGlass.vue";
+// 设计稿(教师助手.fig / css复刻版本.txt)同款图标：IconPark 精确路径 + 自绘帧几何重建
+import NavAdd from "./icons/NavAdd.vue";
+import NavSlides from "./icons/NavSlides.vue";
+import NavLesson from "./icons/NavLesson.vue";
+import NavMath from "./icons/NavMath.vue";
+import NavBook from "./icons/NavBook.vue";
+import NavShapes from "./icons/NavShapes.vue";
+import NavSetting from "./icons/NavSetting.vue";
+import CommentBubble from "./icons/CommentBubble.vue";
+import ChevronDownIp from "./icons/ChevronDownIp.vue";
+import PanelToggle from "./icons/PanelToggle.vue";
 import { useAppStore } from "../stores/app";
 import { useChatStore } from "../stores/chat";
 import ProviderDock from "./ProviderDock.vue";
@@ -28,10 +26,10 @@ const chat = useChatStore();
 // 三大功能（仿九章爱学左栏）：AI课件(PPT) / AI教案 / 生成数学课件。点一下切首页对应工坊。
 // chat（新建对话）是独立首项，不出现在工坊列表(MODE_ORDER)里，这里给个占位图标满足类型。
 const MODE_ICON: Record<TeachMode, any> = {
-  chat: Plus,
-  ppt: Presentation,
-  lesson: FileText,
-  math: Sigma,
+  chat: NavAdd,
+  ppt: NavSlides,
+  lesson: NavLesson,
+  math: NavMath,
 };
 const functionItems = MODE_ORDER.map((m) => ({ mode: m, label: MODES[m].label, icon: MODE_ICON[m] }));
 // 导航同一时刻只能亮一项，靠 homeMode 区分：
@@ -145,7 +143,7 @@ const sortedConvs = computed<Conversation[]>(() => {
         title="收起侧栏 (Ctrl+B)"
         @click="app.toggleSidebar()"
       >
-        <PanelLeftClose :size="17" :stroke-width="1.7" />
+        <PanelToggle :size="18" :stroke-width="1.7" />
       </button>
     </div>
 
@@ -158,7 +156,7 @@ const sortedConvs = computed<Conversation[]>(() => {
         title="新建对话"
         @click="startNew()"
       >
-        <span class="glyph-icon"><Plus :size="24" :stroke-width="1.6" /></span>
+        <span class="glyph-icon"><NavAdd :size="24" :stroke-width="1.6" /></span>
         <span v-if="!app.sidebarCollapsed" class="label">新建对话</span>
       </button>
 
@@ -183,7 +181,7 @@ const sortedConvs = computed<Conversation[]>(() => {
         @click="pickNav('wiki')"
       >
         <span class="glyph-icon"
-          ><BookOpen :size="24" :stroke-width="1.6"
+          ><NavBook :size="24" :stroke-width="1.6"
         /></span>
         <span v-if="!app.sidebarCollapsed" class="label">知识库</span>
       </button>
@@ -196,9 +194,15 @@ const sortedConvs = computed<Conversation[]>(() => {
         @click="pickNav('skill_center')"
       >
         <span class="glyph-icon"
-          ><MoreHorizontal :size="24" :stroke-width="1.6"
+          ><NavShapes :size="24" :stroke-width="1.6"
         /></span>
         <span v-if="!app.sidebarCollapsed" class="label">更多</span>
+        <ChevronDownIp
+          v-if="!app.sidebarCollapsed"
+          class="more-chev"
+          :size="22"
+          :stroke-width="1.6"
+        />
       </button>
 
       <!-- 设置：设计稿里与「更多」平级的顶层项 -->
@@ -208,7 +212,7 @@ const sortedConvs = computed<Conversation[]>(() => {
         title="设置"
         @click="pickNav('settings')"
       >
-        <span class="glyph-icon"><Settings :size="24" :stroke-width="1.6" /></span>
+        <span class="glyph-icon"><NavSetting :size="24" :stroke-width="1.6" /></span>
         <span v-if="!app.sidebarCollapsed" class="label">设置</span>
       </button>
     </nav>
@@ -240,7 +244,7 @@ const sortedConvs = computed<Conversation[]>(() => {
           @click="app.selectConversation(c)"
         >
           <!-- 设计稿：每条对话前一枚 18px 白底圆 + 气泡图标 -->
-          <span class="cv-av"><MessageSquare :size="13" :stroke-width="1.1" /></span>
+          <span class="cv-av"><CommentBubble :size="12" :stroke-width="1.8" /></span>
           <span
             v-if="app.unreadConvs.has(c.id)"
             class="cv-dot"
@@ -312,9 +316,16 @@ const sortedConvs = computed<Conversation[]>(() => {
   padding: 8px 8px 6px;
   overflow: hidden;
 }
-/* 收起 = 整列彻底消失(列宽同时归 0),不再留 48px 图标导轨 */
+/* 收起 = 整列彻底消失(列宽同时归 0),不再留 48px 图标导轨。
+   【不能用 display:none】——那会把 .sb 从 grid 布局里整个移除,后面的 .main 会
+   自动补位挤进第 1 列(宽 0px),整个对话/首页区直接隐形(真踩过:收起侧栏 or
+   PPT 分栏时左边一片空白)。改成「留在文档流里但完全不可见不可点」:列宽由
+   App.vue 的 sidebarWidth=0 归零,这里只要保证自身不撑破 0 宽列即可。 */
 .sb.collapsed {
-  display: none;
+  visibility: hidden;
+  pointer-events: none;
+  padding: 0;
+  min-width: 0;
 }
 
 .sb-head {
@@ -389,11 +400,11 @@ const sortedConvs = computed<Conversation[]>(() => {
   justify-content: center;
   padding: 11px 0;
 }
-/* 「更多」展开态 + 折叠箭头 */
+/* 「更多」行尾下箭头（设计稿 Down/下，与文字同色系但降一档） */
 .more-chev {
   margin-left: auto;
-  font-size: 11px;
-  color: var(--dim);
+  color: var(--muted);
+  flex-shrink: 0;
 }
 .nav-item.expanded {
   color: var(--text);
