@@ -17,11 +17,19 @@ const UNDO_DEPTH = 20;
 export interface SpecEditOpts {
   /** 当前 spec 文件的绝对路径(没有 → 所有操作静默跳过)。 */
   specPath: () => string | null;
-  /** 本次要覆盖的 pptx 路径。**必须**是用户认识的那份,别新造文件名(见各调用方注释)。 */
+  /** 本次要覆盖的成品路径(pptx / docx)。**必须**是用户认识的那份,别新造文件名(见各调用方注释)。 */
   pptxTarget: (specPath: string) => string | Promise<string>;
   /** 新 spec 文本写盘后:刷新预览(各家的 spec 状态形态不同,故由调用方自己接)。 */
   onWritten: (text: string, specPath: string) => void | Promise<void>;
   onError: (msg: string) => void;
+  /**
+   * spec 结构自检。缺省认 PPT 的 `slides` 数组;Word 教案(polaris.doc.json)传
+   * `(o) => Array.isArray(o.blocks)`。放开这一处是为了让两个工坊共用同一套事务 ——
+   * 撤销栈/竞态/「绝不改内存那份」这些坑没必要再踩第二遍。
+   */
+  validate?: (spec: any) => boolean;
+  /** spec → 成品的转换。缺省 spec→pptx;Word 侧传 specToDocx。 */
+  convert?: (specPath: string, out: string) => Promise<unknown>;
 }
 
 export function useSpecEdit(opts: SpecEditOpts) {
@@ -29,11 +37,14 @@ export function useSpecEdit(opts: SpecEditOpts) {
   const busy = ref(false);
   const canUndo = computed(() => undoStack.value.length > 0 && !busy.value);
 
-  /** 落一份新 spec 文本:写盘 → 刷预览 → 重转 pptx(导出物不能与预览脱节)。 */
+  const validate = opts.validate ?? ((o: any) => Array.isArray(o?.slides));
+  const convert = opts.convert ?? ((sp: string, out: string) => artifactsApi.specToPptx(sp, out));
+
+  /** 落一份新 spec 文本:写盘 → 刷预览 → 重转成品(导出物不能与预览脱节)。 */
   async function commit(text: string, specPath: string) {
     await artifactsApi.write(specPath, text);
     await opts.onWritten(text, specPath);
-    await artifactsApi.specToPptx(specPath, await opts.pptxTarget(specPath));
+    await convert(specPath, await opts.pptxTarget(specPath));
   }
 
   /**
@@ -49,7 +60,7 @@ export function useSpecEdit(opts: SpecEditOpts) {
       const r = await artifactsApi.read(specPath);
       const before = r?.text ?? "";
       const obj = JSON.parse(before);
-      if (!obj || !Array.isArray(obj.slides)) throw new Error("spec 结构不符");
+      if (!obj || !validate(obj)) throw new Error("spec 结构不符");
       if (!fn(obj)) return false;
       await commit(JSON.stringify(obj, null, 2), specPath);
       undoStack.value.push(before);

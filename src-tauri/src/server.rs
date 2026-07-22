@@ -92,6 +92,7 @@ pub async fn serve() -> anyhow::Result<()> {
         init_errors.push(format!("provider: {e}"));
     }
     crate::skills::seed_deck_studio_skill();
+    crate::skills::seed_doc_studio_skill();
     crate::skills::seed_web_studio_skill();
     crate::skills::seed_wechat_typesetter_skill();
     crate::skills::seed_media_publisher_skill();

@@ -117,6 +117,80 @@ pub fn detect_pptx_intent(prompt: &str) -> bool {
     triggers.iter().any(|t| lower.contains(t))
 }
 
+/// 「明确要产出一份 Word 教案文档」的强短语（动词 + 教案类名词 / 直指 Word 载体）。
+/// 与下面的弱关键词分两档，唯一用途是 **PPT 与教案意图同时命中时的仲裁**（见
+/// `auto_skills_for_intent`）。改这里前先看那段优先级注释。
+const DOCX_STRONG: &[&str] = &[
+    // 中文 · 动词 + 教案（用户真正要的是 .docx 成品）
+    "写教案",
+    "做教案",
+    "出教案",
+    "生成教案",
+    "起草教案",
+    "教案模板",
+    "写教学设计",
+    "做教学设计",
+    "生成教学设计",
+    "教学设计文档",
+    "写说课稿",
+    "做说课稿",
+    "写导学案",
+    "做导学案",
+    "生成导学案",
+    // 中文 · 教案 + Word 载体（「教案 word」「word 教案」两种语序都收）
+    "word教案",
+    "word 教案",
+    "教案word",
+    "教案 word",
+    "教案文档",
+    "教案.docx",
+];
+
+/// 是否命中教案强短语（仲裁用，见 `auto_skills_for_intent` 的优先级注释）。
+fn is_docx_strong(prompt: &str) -> bool {
+    let lower = prompt.to_lowercase();
+    DOCX_STRONG.iter().any(|t| lower.contains(t))
+}
+
+/// 检测是否是「写 Word 教案 / 教学设计 / 说课稿」的任务。命中即自动激活
+/// polaris-doc-studio（自家 spec 引擎：polaris.doc.json → 原生可编辑 .docx，
+/// 内置青教赛教案范式十节骨架），不再要求用户先去技能中心装 `docx` 通用技能。
+///
+/// 与 detect_pptx_intent 刻意区分：那条产 .pptx 课件，这条产 .docx 教案。
+/// 两者的仲裁规则写在 `auto_skills_for_intent` 里（这里只管「像不像教案」）。
+pub fn detect_docx_intent(prompt: &str) -> bool {
+    let lower = prompt.to_lowercase();
+    if DOCX_STRONG.iter().any(|t| lower.contains(t)) {
+        return true;
+    }
+    let triggers = [
+        // 英文 / 载体
+        "word",
+        "docx",
+        ".doc",
+        // 中文 · 教案类文体（教师端最高频）
+        "教案",
+        "教学设计",
+        "说课稿",
+        "说课",
+        "导学案",
+        "学案",
+        "教案库",
+        "公开课教案",
+        "备课本",
+        "集体备课",
+        "单元教学设计",
+        "听课记录",
+        // 中文 · 通用 Word 文档诉求
+        "word文档",
+        "word 文档",
+        "文档",
+        "文稿",
+        "打印稿",
+    ];
+    triggers.iter().any(|t| lower.contains(t))
+}
+
 /// 检测是否是「做网站 / 网页 / HTML 页面成品」的创作任务。命中即自动激活
 /// polaris-web-studio（「网站生成」引擎：主题体系 + 高级动效 + 自包含单文件）——
 /// 与已隐藏的「网站生成」面板同款引擎，现在全靠对话触发。
@@ -321,7 +395,8 @@ pub fn detect_mao_consult_intent(prompt: &str) -> bool {
 
 /// 按任务意图自动激活的 skill（不依赖用户在对话框点选）。可返回多个。
 /// 创建技能意图 → skill-creator；网页/浏览器自动化 → cloak-browser；
-/// 做 PPT → polaris-deck-studio（自家高级引擎）；做网站/网页/HTML → polaris-web-studio；
+/// 做 PPT → polaris-deck-studio（自家高级引擎）；写 Word 教案 → polaris-doc-studio
+/// （两条 spec 线互斥，仲裁规则见函数体内注释）；做网站/网页/HTML → polaris-web-studio；
 /// 生成图片 → image-gen；请教毛主席 → consult-mao。
 /// 「演示工坊」「网站生成」两个 UI 入口已从侧栏隐藏，对话意图触发是它们现在的唯一入口。
 pub fn auto_skills_for_intent(prompt: &str) -> Vec<(SkillMeta, String)> {
@@ -345,7 +420,19 @@ pub fn auto_skills_for_intent(prompt: &str) -> Vec<(SkillMeta, String)> {
             out.push(s);
         }
     }
-    if detect_pptx_intent(prompt) {
+    // ── PPT(课件) 与 Word(教案) 两条 spec 线的仲裁 ────────────────────────────
+    // 两者的关键词天然重叠:「演示文档」含「文档」、「按这份教案做课件PPT」含「教案」。
+    // 同时注入两份 SKILL.md 会让模型在「产 .pptx 还是 .docx」上摇摆,故只能选一条。
+    // 优先级规则:
+    //   1. 只命中一条 → 就走那条。
+    //   2. 两条都命中 → **PPT 优先**。理由:「课件/PPT/幻灯片」是明确的成品诉求,
+    //      而此时的「教案」多半只是素材(「照这份教案做课件」)。
+    //   3. 例外 —— 出现教案强短语(DOCX_STRONG:写教案/做教学设计/word 教案…)时,
+    //      教案关键词比 PPT 词更具体,判定用户真正要的是 .docx → **教案优先**。
+    let want_pptx = detect_pptx_intent(prompt);
+    let want_docx = detect_docx_intent(prompt);
+    let docx_wins = want_docx && (!want_pptx || is_docx_strong(prompt));
+    if want_pptx && !docx_wins {
         // 工坊面板入口已隐藏 → 对话触发是 PPT 的主路径,这里注入不能落空。
         // 同 web 线处理首启竞态:catalog 命中但磁盘还没落盘时,模型会 Read 不到 designers/,
         // 故 find miss 就先补种再取一次。
@@ -354,6 +441,17 @@ pub fn auto_skills_for_intent(prompt: &str) -> Vec<(SkillMeta, String)> {
             find(DECK_ID)
         });
         if let Some(s) = deck {
+            out.push(s);
+        }
+    }
+    if docx_wins {
+        // 同 deck 处理首启竞态:catalog 命中但磁盘还没落盘时先补种再取一次,
+        // 否则模型拿不到盘上的 skill.md(青教赛范式骨架就在里面)。
+        let doc = find(DOC_ID).or_else(|| {
+            seed_doc_studio_skill();
+            find(DOC_ID)
+        });
+        if let Some(s) = doc {
             out.push(s);
         }
     }
@@ -496,6 +594,34 @@ mod intent_tests {
         ));
         assert!(!detect_web_create_intent("帮我抓取这个网站的数据"));
         assert!(!detect_web_create_intent("去官网下载最新安装包"));
+    }
+
+    // 教案意图:教师端高频文体词与 Word 载体词要命中
+    #[test]
+    fn docx_intent_hits_lesson_plan_phrases() {
+        assert!(detect_docx_intent("帮我写一份《浮力》的教案"));
+        assert!(detect_docx_intent("做一个高三导数复习的教学设计"));
+        assert!(detect_docx_intent("生成一份说课稿"));
+        assert!(detect_docx_intent("整理成 Word 文档发我"));
+        assert!(!detect_docx_intent("今天天气怎么样"));
+    }
+
+    // PPT / 教案两条 spec 线的仲裁:默认 PPT 优先,教案强短语反超
+    #[test]
+    fn docx_vs_pptx_priority() {
+        // 只命中教案 → 教案强短语判定为真时才反超,这里 PPT 未命中,无需强短语
+        assert!(detect_docx_intent("写教案") && !detect_pptx_intent("写教案"));
+        // 「演示文档」含「文档」→ 两条都命中,但无教案强短语 → PPT 赢
+        let p = "帮我做份演示文档";
+        assert!(detect_pptx_intent(p) && detect_docx_intent(p));
+        assert!(!is_docx_strong(p));
+        // 「照这份教案做课件 PPT」→ 两条都命中,教案只是素材 → PPT 赢
+        let p = "照这份教案做课件PPT";
+        assert!(detect_pptx_intent(p) && detect_docx_intent(p));
+        assert!(!is_docx_strong(p));
+        // 明确要 Word 教案,顺带提了 PPT → 教案强短语反超
+        let p = "先写教案，PPT 以后再说";
+        assert!(detect_pptx_intent(p) && is_docx_strong(p));
     }
 
     // 开发意图:工程消息命中、日常/自媒体消息不命中(误报=纪律卡污染闲聊)

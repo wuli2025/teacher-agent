@@ -30,6 +30,20 @@ pub(crate) fn catalog() -> Vec<CatalogSkill> {
             preinstalled: true,
             system_prompt: DECK_SKILL_MD,
         },
+        // ── 文档工坊（Word 教案 / 教学设计，spec 路线 → 原生可编辑 .docx） ──
+        // 与 deck-studio 同机制：catalog 里挂 system_prompt(SKILL.md 同一份内嵌常量)，同时
+        // seed_doc_studio_skill() 把 skill.md 落到磁盘供 agent Read。两处缺一不可：
+        // 只注册不落盘 → agent 在盘上找不到技能；只落盘不注册 → find() miss，教案意图注入落空。
+        // 注意与市场技能 `docx`（Anthropic 官方 python-docx 路线）并存：那条是通用 Word 处理，
+        // 这条是 Polaris 自家 spec 引擎 + 青教赛范式，教案场景优先走这条。
+        CatalogSkill {
+            id: "polaris-doc-studio",
+            name: "文档工坊 · Word 教案 / 教学设计",
+            description: "把课题/讲稿/素材写成**原生可编辑**的 .docx 教案：模型只出 spec(polaris.doc.json)决策结构与内容，Polaris 引擎确定性直写 OOXML —— 真段落真表格真公式(OMML)，Word/WPS 里随便改。14 种块类型、5 套主题、行内公式 $LaTeX$；内置青教赛教案范式十节骨架（基本信息表/课标考情/学情/三维目标/重难点/教法学法/教学过程四栏表/板书设计/分层作业/教学反思/课程思政）",
+            source: "official",
+            preinstalled: true,
+            system_prompt: DOC_SKILL_MD,
+        },
         // ── GitHub 高星教师适用技能（anthropics/skills 官方文档四件套 + humanizer） ──
         CatalogSkill {
             id: "docx",
@@ -167,8 +181,8 @@ pub(crate) fn find_catalog(id: &str) -> Option<CatalogSkill> {
 pub(crate) fn skill_category(id: &str) -> &'static str {
     match id {
         // 办公文档
-        "polaris-deck-studio" | "pdf" | "xlsx" | "docx" | "doc-coauthoring" | "pptx"
-        | "deep-research" | "web-search" => "办公文档",
+        "polaris-deck-studio" | "polaris-doc-studio" | "pdf" | "xlsx" | "docx"
+        | "doc-coauthoring" | "pptx" | "deep-research" | "web-search" => "办公文档",
         // 教学教研
         "humanizer" => "教学教研",
         // 财务会计

@@ -21,6 +21,12 @@ const HELP: &str = r#"polaris-forge — Polaris Forge 渲染引擎 CLI
       结构化 spec → 原生 100% 可编辑 .pptx(真文本框/形状/项目符号,零浏览器依赖)。
       spec 里 image-full / image-text 版式的 image 字段吃本地图片,配图用下面的 image 生。
 
+  polaris-forge spec-docx --spec=<polaris.doc.json|JSON字符串> --out=<out.docx>
+      Word 教案 spec → 原生可编辑 .docx(真段落/表格/编号/公式,零浏览器依赖)。
+
+  polaris-forge docx-spec --in=<x.docx> --out=<polaris.doc.json>
+      .docx → Word 教案 spec(启发式判块;插图抽到源文件同级 img/)。
+
   polaris-forge image --prompt=<画面描述> --out=<out.png> [--ratio=16:9]
       文生图(MiniMax image-01,纯 Rust,零 Python)。画幅:1:1|16:9|4:3|3:2|2:3|3:4|9:16|21:9。
       key 走 MINIMAX_API_KEY 或供应商坞的 MiniMax 条目。
@@ -101,6 +107,22 @@ fn run(cmd: &str, args: &[String]) -> Result<Value, String> {
     match cmd {
         "preflight" => Ok(app::forge::forge_preflight()),
         "spec-pptx" => app::forge::spec_to_pptx_sync(req(args, "spec")?, req(args, "out")?),
+        // Word 教案工坊(与 spec-pptx 同构的一对)
+        "spec-docx" => app::forge::spec_to_docx_sync(req(args, "spec")?, req(args, "out")?),
+        "docx-spec" => {
+            let v = app::forge::docx_to_spec_sync(req(args, "in")?)?;
+            // --out 给了就把 spec 落盘(agent 直接拿文件继续改),否则只回 JSON
+            if let Some(out) = flag(args, "out") {
+                if let Some(p) = std::path::Path::new(&out).parent() {
+                    if !p.as_os_str().is_empty() {
+                        let _ = std::fs::create_dir_all(p);
+                    }
+                }
+                let body = serde_json::to_string_pretty(&v["spec"]).map_err(|e| e.to_string())?;
+                std::fs::write(&out, body).map_err(|e| format!("写 {out} 失败: {e}"))?;
+            }
+            Ok(v)
+        }
         // 走壳桥接而非直调引擎:ImageCfg(endpoint/model/key)由 kernel 供应商坞解析注入,
         // 与桌面端同一条路 —— 直调 generate 会绕开配置层(引擎签名加 cfg 后 CLI 曾在此失配)。
         "image" => app::imagegen::forge_image_sync(

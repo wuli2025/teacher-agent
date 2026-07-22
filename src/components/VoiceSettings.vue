@@ -291,8 +291,9 @@ async function runLearn() {
           <span v-if="listenErr" class="err-line" style="margin: 0">{{ listenErr }}</span>
         </div>
         <div class="tierhint">
-          Windows 桌面版已内置本地语音识别;首次使用前请在「设置 → 感官 API」
-          下载「SenseVoice-Small」感官包(约 230&nbsp;MB)。macOS 即将支持;Docker / Web 版暂不支持本地听写。
+          Windows 桌面版已内置本地语音识别;「SenseVoice-Small」模型(约 240&nbsp;MB)会在首次启动后
+          自动下载一次,之后升级不再重下。想看进度或手动重装,去「设置 → 感官 API」。
+          macOS 即将支持;Docker / Web 版暂不支持本地听写。
         </div>
       </section>
 

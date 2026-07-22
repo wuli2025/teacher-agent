@@ -872,6 +872,9 @@ fn dispatch_sync(cmd: &str, a: &Args, app: AppHandle) -> Result<Value, String> {
         ),
         // spec JSON → 原生可编辑 .pptx(路线 B 传统PPT,零浏览器 → slim 镜像也能出 PPT)
         "forge_spec_to_pptx" => forge::spec_to_pptx_sync(req_str(a, "spec")?, req_str(a, "out")?),
+        // spec JSON → 原生可编辑 .docx(Word 教案工坊);导入方向给「拖一份别人的教案进来编辑」
+        "forge_spec_to_docx" => forge::spec_to_docx_sync(req_str(a, "spec")?, req_str(a, "out")?),
+        "forge_docx_to_spec" => forge::docx_to_spec_sync(req_str(a, "path")?),
         // 桌面同名命令是 async 包装(防冻 UI); 这里本就在阻塞线程池, 直调同步内核
         "forge_deck_to_pptx" => forge::deck_to_pptx_sync(
             req_str(a, "deck")?,

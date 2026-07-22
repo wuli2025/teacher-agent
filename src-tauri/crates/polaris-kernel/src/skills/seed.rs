@@ -33,6 +33,36 @@ fn write_deck_studio_files(dest: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 启动时确保「文档工坊」技能（Word 教案）在 ~/PolarisTeacher/skills 落盘（只有 skill.md，
+/// 单文件技能）。目录缺失 / 版本旧（`.polaris_version` < `DOC_VERSION`）就（重）写；
+/// 已是最新则跳过。best-effort：失败只让教案制作暂不可用，不阻断 App 启动。
+///
+/// SKILL.md 必须真落到磁盘：spawn 的 claude agent 要在盘上读 polaris.doc.json 的 spec v1
+/// 约定与青教赛教案范式骨架。
+pub fn seed_doc_studio_skill() {
+    let Some(root) = skills_dir() else {
+        return;
+    };
+    let dest = root.join(DOC_ID);
+    let ver_file = dest.join(".polaris_version");
+    let stored = fs::read_to_string(&ver_file).unwrap_or_default();
+    let present = dest.join("skill.md").exists();
+    if present && stored.trim() == DOC_VERSION {
+        return;
+    }
+    if write_doc_studio_files(&dest).is_ok() {
+        let _ = fs::write(&ver_file, DOC_VERSION);
+    }
+}
+
+/// 把内嵌的「文档工坊」文件写到目标目录。技能正文写成小写 `skill.md`，与扫描约定一致。
+/// 教案不吃设计师人格包（Word 排版由主题表确定性决定，没有像素决策空间），故不调 write_designers。
+fn write_doc_studio_files(dest: &Path) -> Result<(), String> {
+    fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    fs::write(dest.join("skill.md"), DOC_SKILL_MD).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// 启动时确保「网站生成」技能在 ~/PolarisTeacher/skills 落盘。目录缺失 / 版本旧
 /// （`.polaris_version` < `WEB_VERSION`）就（重）写；已是最新则跳过。best-effort。
 pub fn seed_web_studio_skill() {

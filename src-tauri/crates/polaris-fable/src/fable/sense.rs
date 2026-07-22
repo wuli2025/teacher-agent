@@ -604,7 +604,95 @@ pub fn sense_pack_remove(id: String) -> Result<(), String> {
             fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
         }
     }
+    // 用户主动删 = 明确不要它:落自动预置标记,免得下次启动又被静默补装回来。
+    auto_mark(pack.id);
     Ok(())
+}
+
+// ─────────────────── 首启静默预置(默认自带语音模型)───────────────────
+// 语音输入是开箱即用的基础能力,不该让用户先跑一趟设置页。但 239MB 塞进安装包会让
+// 每次自动更新都重下一遍(Tauri updater 产物就是整包),所以走「首启后台下载一次」:
+// 装过一次就永久落标记,之后无论升级多少版都不再重来。
+
+/// 首启自动预置的感官包 id(只放本机听写真正用得上的那个)。
+const AUTO_PACKS: &[&str] = &["sensevoice-small"];
+
+fn auto_marker_path() -> Option<PathBuf> {
+    data_dir().map(|d| d.join("sense_autoprovision.json"))
+}
+
+/// 已自动预置过的包 id 集合(读不出就当空集,失败方向 = 再试一次,不是永久不装)。
+fn auto_done_ids() -> HashSet<String> {
+    let Some(p) = auto_marker_path() else {
+        return HashSet::new();
+    };
+    fs::read_to_string(&p)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Vec<String>>(&t).ok())
+        .map(|v| v.into_iter().collect())
+        .unwrap_or_default()
+}
+
+/// 把 id 记进「已自动预置」名单(幂等)。
+fn auto_mark(id: &str) {
+    let Some(p) = auto_marker_path() else { return };
+    let mut ids = auto_done_ids();
+    if !ids.insert(id.to_string()) {
+        return;
+    }
+    let mut list: Vec<String> = ids.into_iter().collect();
+    list.sort();
+    if let Ok(txt) = serde_json::to_string(&list) {
+        let _ = atomic_write(&p, &txt);
+    }
+}
+
+/// 首启静默补齐默认感官包。启动时调用,自身立即返回(下载在后台线程)。
+///
+/// 三道闸:① 非 Windows 直接跳过(mac/Docker 版尚无本机听写,不白耗 240MB 流量);
+/// ② 标记里有 = 装过或用户删过 → 永不再来(升级也不重装);③ 盘上已就位 → 补标记后跳过。
+/// 下载失败不落标记 —— 离线首启的用户下次开机会自动重试。
+pub fn autoprovision_packs(app: &AppHandle) {
+    if !cfg!(target_os = "windows") {
+        return;
+    }
+    let done = auto_done_ids();
+    let todo: Vec<&SensePack> = AUTO_PACKS
+        .iter()
+        .filter(|id| !done.contains(**id))
+        .filter_map(|id| SENSE_PACKS.iter().find(|p| p.id == *id))
+        .collect();
+    if todo.is_empty() {
+        return;
+    }
+    let ids: Vec<String> = todo.iter().map(|p| p.id.to_string()).collect();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        // 让首帧和其它启动任务先走完,别一开机就抢满带宽。
+        std::thread::sleep(Duration::from_secs(20));
+        for id in ids {
+            let Some(pack) = SENSE_PACKS.iter().find(|p| p.id == id) else {
+                continue;
+            };
+            if pack_installed(pack) {
+                auto_mark(&id); // 老用户手动装过:补标记,之后不再过问
+                continue;
+            }
+            if sense_pack_install(app.clone(), id.clone()).is_err() {
+                continue; // 已在下载中等:交给那一路
+            }
+            // sense_pack_install 是异步的,轮询等它出结果再决定要不要落标记。
+            loop {
+                std::thread::sleep(Duration::from_secs(3));
+                if !PACK_BUSY.lock().contains(&id) {
+                    break;
+                }
+            }
+            if pack_installed(pack) {
+                auto_mark(&id);
+            }
+        }
+    });
 }
 
 // ───────────────────────── 初始化与合并 ─────────────────────────

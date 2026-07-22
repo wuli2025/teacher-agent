@@ -1,0 +1,167 @@
+[
+  {
+    "docId": "lesson_math_derivative",
+    "fileName": "01_数学_导数与函数单调性极值最值(高考一轮专题).docx",
+    "title": "导数在函数单调性、极值与最值中的应用",
+    "subtitle": "——高考一轮复习专题突破（第1课时）",
+    "subject": "数学",
+    "grade": "高中",
+    "blocks": 39,
+    "words": 2487,
+    "prompt": "写一份高中数学《导数在函数单调性、极值与最值中的应用》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_math_ellipse_chord",
+    "fileName": "02_数学_直线与椭圆的位置关系及弦长问题(高考冲刺专题).docx",
+    "title": "直线与椭圆的位置关系及弦长、中点弦问题",
+    "subtitle": "——高考解析几何冲刺专题（第1课时）",
+    "subject": "数学",
+    "grade": "高中",
+    "blocks": 38,
+    "words": 2646,
+    "prompt": "写一份高中数学《直线与椭圆的位置关系及弦长、中点弦问题》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_math_series_sum",
+    "fileName": "03_数学_数列求和之错位相减与裂项相消(专题突破).docx",
+    "title": "数列求和的核心方法：错位相减与裂项相消",
+    "subtitle": "——高考数列专题突破（第1课时）",
+    "subject": "数学",
+    "grade": "高中",
+    "blocks": 39,
+    "words": 2516,
+    "prompt": "写一份高中数学《数列求和的核心方法：错位相减与裂项相消》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_math_trig_identity",
+    "fileName": "04_数学_三角恒等变换与求值(高考专题).docx",
+    "title": "三角恒等变换与三角函数的化简求值",
+    "subtitle": "——高考三角专题突破（第1课时）",
+    "subject": "数学",
+    "grade": "高中",
+    "blocks": 39,
+    "words": 2648,
+    "prompt": "写一份高中数学《三角恒等变换与三角函数的化简求值》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_math_distribution",
+    "fileName": "05_数学_二项分布与正态分布(高考概率统计专题).docx",
+    "title": "二项分布与正态分布的辨析与应用",
+    "subtitle": "——高考概率统计专题突破（第1课时）",
+    "subject": "数学",
+    "grade": "高中",
+    "blocks": 39,
+    "words": 2304,
+    "prompt": "写一份高中数学《二项分布与正态分布的辨析与应用》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_english_continuation",
+    "fileName": "06_英语_读后续写情节构建与语言升级(高考写作专题).docx",
+    "title": "读后续写（Continuation Writing）：情节构建与语言升级",
+    "subtitle": "——高考英语写作专题突破（第1课时）",
+    "subject": "英语",
+    "grade": "高中",
+    "blocks": 38,
+    "words": 2125,
+    "prompt": "写一份高中英语《读后续写（Continuation Writing）：情节构建与语言升级》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_english_grammar_fill",
+    "fileName": "07_英语_语法填空解题策略(高考专题).docx",
+    "title": "语法填空（Grammar Filling）解题策略",
+    "subtitle": "——高考英语二轮专题突破（第1课时）",
+    "subject": "英语",
+    "grade": "高中",
+    "blocks": 38,
+    "words": 1882,
+    "prompt": "写一份高中英语《语法填空（Grammar Filling）解题策略》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_english_inference",
+    "fileName": "08_英语_阅读理解推理判断题解题策略(高考专题).docx",
+    "title": "阅读理解之推理判断题（Inference）解题策略",
+    "subtitle": "——高考英语阅读专题突破（第1课时）",
+    "subject": "英语",
+    "grade": "高中",
+    "blocks": 38,
+    "words": 1965,
+    "prompt": "写一份高中英语《阅读理解之推理判断题（Inference）解题策略》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_english_summary",
+    "fileName": "09_英语_概要写作Summary Writing(高考写作专题).docx",
+    "title": "概要写作（Summary Writing）：要点提炼与同义改写",
+    "subtitle": "——高考英语写作专题突破（第1课时）",
+    "subject": "英语",
+    "grade": "高中",
+    "blocks": 39,
+    "words": 1876,
+    "prompt": "写一份高中英语《概要写作（Summary Writing）：要点提炼与同义改写》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_chinese_poetry_diction",
+    "fileName": "10_语文_古代诗歌鉴赏之炼字炼句(高考专题).docx",
+    "title": "古代诗歌鉴赏之炼字炼句",
+    "subtitle": "——高考诗歌鉴赏专题突破（第1课时）",
+    "subject": "语文",
+    "grade": "高中",
+    "blocks": 38,
+    "words": 1857,
+    "prompt": "写一份高中语文《古代诗歌鉴赏之炼字炼句》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_chinese_classical_translation",
+    "fileName": "11_语文_文言文翻译得分点突破(高考专题).docx",
+    "title": "文言文翻译的得分点突破",
+    "subtitle": "——高考文言文阅读专题（第1课时）",
+    "subject": "语文",
+    "grade": "高中",
+    "blocks": 37,
+    "words": 1776,
+    "prompt": "写一份高中语文《文言文翻译的得分点突破》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_politics_contradiction",
+    "fileName": "12_政治_用对立统一观点看问题(矛盾分析法·高考专题).docx",
+    "title": "用对立统一的观点看问题——矛盾分析法",
+    "subtitle": "——高中思想政治《哲学与文化》高考专题（第1课时）",
+    "subject": "政治",
+    "grade": "高中",
+    "blocks": 39,
+    "words": 1885,
+    "prompt": "写一份高中政治《用对立统一的观点看问题——矛盾分析法》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_history_xinhai",
+    "fileName": "13_历史_辛亥革命与中华民国的建立(高考专题).docx",
+    "title": "辛亥革命与中华民国的建立",
+    "subtitle": "——《中外历史纲要(上)》高考主题复习（第1课时）",
+    "subject": "历史",
+    "grade": "高中",
+    "blocks": 39,
+    "words": 2013,
+    "prompt": "写一份高中历史《辛亥革命与中华民国的建立》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_geography_weather_system",
+    "fileName": "14_地理_常见天气系统之锋与气旋(高考专题).docx",
+    "title": "常见天气系统——锋面、低压（气旋）与高压（反气旋）",
+    "subtitle": "——高考地理专题突破（第1课时）",
+    "subject": "地理",
+    "grade": "高中",
+    "blocks": 39,
+    "words": 1899,
+    "prompt": "写一份高中地理《常见天气系统——锋面、低压（气旋）与高压（反气旋）》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  },
+  {
+    "docId": "lesson_physics_magnetic_field",
+    "fileName": "15_物理_带电粒子在匀强磁场中的运动(高考专题).docx",
+    "title": "带电粒子在匀强磁场中的运动",
+    "subtitle": "——高考物理专题突破：圆周运动的“定圆心、求半径、算时间”（第1课时）",
+    "subject": "物理",
+    "grade": "高中",
+    "blocks": 39,
+    "words": 2286,
+    "prompt": "写一份高中物理《带电粒子在匀强磁场中的运动》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。"
+  }
+]

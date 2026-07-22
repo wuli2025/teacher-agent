@@ -43,7 +43,7 @@ const DISPLAY_EXTS: &[&str] = &[
 /// 扩展名白名单之外按文件名特判放行的「源稿清单」: 传统 PPT 的 spec 是 DeckStudio
 /// 预览/兜底转换(ensureSpecConverted)的唯一输入,滤掉它整条路线 B 就瘫——
 /// 这是 v1.0.2 白名单与 PPT 可编辑化两个并行改动撞出的集成回归。
-const DISPLAY_NAMES: &[&str] = &["polaris.slides.json"];
+const DISPLAY_NAMES: &[&str] = &["polaris.slides.json", "polaris.doc.json"];
 
 /// 该产物是「源稿清单」而非交付物本身吗? 它靠 DISPLAY_NAMES 特批进了产物列表
 /// (DeckStudio 拿它做预览/兜底转换), 但给对话取名时绝不能当成品 —— 否则侧栏

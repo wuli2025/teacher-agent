@@ -1213,6 +1213,13 @@ export const artifacts = {
   /** polaris.slides.json(spec) → 原生可编辑 .pptx（路线 B 传统PPT，零浏览器）。spec 传文件路径或 JSON 字符串 */
   specToPptx: (spec: string, out: string) =>
     invoke<{ ok: boolean; slides: number; warnings: string[] }>("forge_spec_to_pptx", { spec, out }),
+  /** polaris.doc.json(Word 教案 spec) → 原生可编辑 .docx（纯 Rust OOXML）。spec 传文件路径或 JSON 字符串 */
+  specToDocx: (spec: string, out: string) =>
+    invoke<{ ok: boolean; blocks: number; warnings: string[] }>("forge_spec_to_docx", { spec, out }),
+  /** 任意 .docx → polaris.doc.json 结构（导入别人的教案进编辑器）。
+   *  `spec` 是**已解析的对象**（引擎回的是 serde_json::Value），落盘前自己 stringify。 */
+  docxToSpec: (path: string) =>
+    invoke<{ ok: boolean; spec: unknown; warnings: string[] }>("forge_docx_to_spec", { path }),
 };
 
 /** 跨对话产物搜索命中 */

@@ -36,7 +36,8 @@ pub(crate) fn ensure_recognizer() -> Result<(), String> {
     let tokens = dir.join("tokens.txt");
     if !model.exists() || !tokens.exists() {
         return Err(format!(
-            "SenseVoice 模型未下载({});去「设置 → 感官 API」下载「SenseVoice-Small」感官包",
+            "SenseVoice 模型还没就位({});首次启动会在后台自动下载(约 240MB),稍等几分钟再试;\
+             也可去「设置 → 感官 API」手动下载「SenseVoice-Small」感官包",
             dir.display()
         ));
     }

@@ -132,12 +132,13 @@ pub fn run() {
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
             provider::init(h)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
-            // 内嵌技能落盘（演示工坊 / 网站生成 / 壹伴排版）：版本门控的 best-effort 磁盘写，
+            // 内嵌技能落盘（演示工坊 / 文档工坊 / 网站生成 / 壹伴排版）：版本门控的 best-effort 磁盘写，
             // 无人 await —— 它们只在之后 spawn claude agent 时才被读到（那远在启动之后）。整体
             // 挪到后台线程，从「窗口首帧前的 setup 主线程」移除。各 seed_* 自身仍幂等、不覆盖
             // 用户改动。
             std::thread::spawn(|| {
                 skills::seed_deck_studio_skill();
+                skills::seed_doc_studio_skill();
                 skills::seed_web_studio_skill();
                 skills::seed_wechat_typesetter_skill();
                 skills::seed_media_publisher_skill();
@@ -154,6 +155,9 @@ pub fn run() {
             integrations::feishu::auto_start_if_enabled(h);
             // 寓言计划:感官 API 坞(注册表合并 + 落盘)与回声层「每日做梦」调度。
             sense::init();
+            // 默认自带语音模型:首启后台静默补齐 SenseVoice-Small(仅 Win,装过一次永不重来,
+            // 升级不重下)。见 sense::autoprovision_packs。
+            sense::autoprovision_packs(h);
             // 语音输入「极速说」:配置 + 个人词表(首启种子)就位,供防污染秒达档使用。
             voice::init();
             echo::start_scheduler(h.clone());
@@ -379,6 +383,9 @@ pub fn run() {
             forge::forge_deck_to_pptx,
             // 路线 B：spec JSON → 原生可编辑 .pptx（传统PPT模式，零浏览器）
             forge::forge_spec_to_pptx,
+            // Word 教案工坊：spec ⇄ .docx（纯 Rust 直写/解析 OOXML，与 PPT 侧同构）
+            forge::forge_spec_to_docx,
+            forge::forge_docx_to_spec,
             forge::forge_deck_to_video,
             forge::forge_deck_fx_video,
             forge::forge_tts,

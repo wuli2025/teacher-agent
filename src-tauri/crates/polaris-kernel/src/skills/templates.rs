@@ -31,6 +31,22 @@ pub(crate) const DECK_SKILL_MD: &str =
 pub(crate) const DECK_THEMES_CSS: &str =
     include_str!("../../../../src/templates/skills/polaris-deck-studio/assets/themes.css");
 
+// ───────── 「文档工坊」技能（Word 教案 / 教学设计，编译期内嵌，启动落盘）─────────
+// 与 deck-studio 完全同构的另一条 spec 路线:模型只产 polaris.doc.json(结构+内容决策),
+// polaris-forge 的原生引擎(docx_native.rs)确定性直写 OOXML → 真段落/真表格/真 OMML 公式、
+// 100% 可编辑的 .docx,零 python-docx 零截图。
+//
+// SKILL.md 是 spec v1 的权威说明,**必须与 docs/DOC_SPEC.md + docx_native.rs 的字段逐字对齐**
+// ——改了块类型/主题表/行内标记,这里同步改并 +1 版本号,否则模型按旧约定产 spec,内容会被静默丢弃。
+//
+// 技能灵魂是「青教赛教案范式」十节骨架(基本信息表 + 课标考情 + 学情 + 三维目标 + 重难点 +
+// 教法学法 + 教学过程四栏表 + 板书设计 + 分层作业 + 教学反思 + 课程思政),范式沉淀自 15 篇真范例。
+pub(crate) const DOC_ID: &str = "polaris-doc-studio";
+// 改动 SKILL.md 后必须 +1，让已安装用户下次启动拿到更新。
+pub(crate) const DOC_VERSION: &str = "1";
+pub(crate) const DOC_SKILL_MD: &str =
+    include_str!("../../../../src/templates/skills/polaris-doc-studio/SKILL.md");
+
 // ───────── 设计师人格包（designers/，编译期内嵌，随 deck-studio / web-studio 落盘）─────────
 // 「选设计师」体系：11 位设计师人格 + 美学地基(_foundation) + 总索引(INDEX.md)。
 // auto 模式按 INDEX.md 路由表按内容气质选人；用户指定则用指定的。两个工坊复用同一份包。

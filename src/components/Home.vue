@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted } from "vue";
-import { Paperclip, Image as ImageIcon, Mic, Send, Search, Loader, Eye, Sparkles, X, ChevronLeft, ChevronRight, Maximize, MonitorPlay } from "@lucide/vue";
+import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted, defineAsyncComponent } from "vue";
+import { Paperclip, Image as ImageIcon, Mic, Send, Search, Loader, Eye, Sparkles, X, ChevronLeft, ChevronRight, Maximize, MonitorPlay, FileText } from "@lucide/vue";
+import { parseDocLoose } from "../lib/docSpec";
+// 教案范例的「点开看」= 真 Word 版预览:与编辑器同一个渲染器。懒加载,不吸进首屏 chunk。
+const DocViewer = defineAsyncComponent(() => import("./DocViewer.vue"));
 import { useAppStore } from "../stores/app";
 import { useChatStore } from "../stores/chat";
 import { chat as chatApi, artifacts, invoke, listen, isTauri, uploadToBackend, type AttachedFile } from "../tauri";
@@ -294,17 +297,41 @@ const preview = ref<TeachSample | null>(null);
 const page = ref(1);
 const cloning = ref(false);
 
+// 教案范例走「真 Word 版预览」:把 public/sample-docs/<docId>.json 喂给 DocViewer,
+// 与编辑器同一个渲染器 —— 用户在这儿看到的纸张,就是点「做同款」之后能改的那份。
+// 不用页截图(教案是流式长文档,截成一页页图既笨重又改不了),也不用 PDF(装不下编辑能力)。
+const docSpec = ref<any | null>(null);
+const docLoading = ref(false);
+const isDocPreview = computed(() => !!preview.value?.docId);
+
+async function loadDocSpec(s: TeachSample) {
+  docSpec.value = null;
+  docLoading.value = true;
+  try {
+    const res = await fetch(`/sample-docs/${s.docId}.json`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { spec } = parseDocLoose(await res.text());
+    if (preview.value?.id === s.id) docSpec.value = spec; // 竞态:读盘期间已切走
+  } catch (e: any) {
+    toast.error(`范例教案载入失败：${e?.message ?? e}`);
+  } finally {
+    docLoading.value = false;
+  }
+}
+
 function openSample(s: TeachSample) {
-  if (!s.deckId) {
+  if (!s.deckId && !s.docId) {
     useSample(s);
     return;
   }
   preview.value = s;
   page.value = 1;
+  if (s.docId) void loadDocSpec(s);
 }
 function closePreview() {
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   preview.value = null;
+  docSpec.value = null;
 }
 
 // 全屏播放：预览右上角进入放映模式，点击/方向键翻页，Esc 退出
@@ -354,8 +381,11 @@ function bytesToBase64(buf: ArrayBuffer): string {
   return btoa(bin);
 }
 
-// 做同款的提示词按模式区分：课件模式参考版式做课件，教案模式参考课件写教案
+// 做同款的提示词按模式区分：课件模式参考版式做课件，教案模式参考真教案再写一份同范式的
 function samePrompt(s: TeachSample): string {
+  if (s.docId) {
+    return `参考附件《${s.title}》这份青教赛范式教案的结构、颗粒度与行文口吻，写一份同款教案：换成我指定的课题（下面补充），十个板块齐全，教学过程用四栏表（教学环节·教师活动·学生活动·设计意图），设计意图要写实。\n\n课题：`;
+  }
   if (app.homeMode === "lesson") {
     return `参考附件《${s.title}》这份课件的教学思路与环节编排，为这节课写一份完整教案（教学目标、重难点、教学过程、板书设计、作业）。`;
   }
@@ -370,6 +400,35 @@ async function materializeDeck(s: TeachSample): Promise<AttachedFile> {
   const af = await chatApi.attachImage(undefined, s.fileName || `${s.title}.pptx`, b64);
   if (!af.ok) throw new Error(af.error || "附件写入失败");
   return { ...af, kind: "office" };
+}
+
+/** 教案范例的原 .docx 落盘（同 materializeDeck，只是换了资源目录与扩展名）。 */
+async function materializeDoc(s: TeachSample): Promise<AttachedFile> {
+  const res = await fetch(`/sample-doc-files/${s.docId}.docx`);
+  if (!res.ok) throw new Error(`范例文件读取失败 HTTP ${res.status}`);
+  const b64 = bytesToBase64(await res.arrayBuffer());
+  const af = await chatApi.attachImage(undefined, s.fileName || `${s.title}.docx`, b64);
+  if (!af.ok) throw new Error(af.error || "附件写入失败");
+  return { ...af, kind: "office" };
+}
+
+/** 用 Word 打开原教案：保真度 100%，与「用 PowerPoint 放映」同一套理由。 */
+async function openInWord(s: TeachSample) {
+  if (!s.docId || opening.value) return;
+  if (!isTauri) {
+    toast.info("用 Word 打开在桌面端可用");
+    return;
+  }
+  opening.value = true;
+  try {
+    const af = await materializeDoc(s);
+    await artifacts.openExternal(af.path);
+    toast.success(`已用系统默认程序打开《${s.title}》`);
+  } catch (e: any) {
+    toast.error(`打开失败：${e?.message ?? e}`);
+  } finally {
+    opening.value = false;
+  }
 }
 
 /** 用 PowerPoint 放映：交给系统默认程序打开原课件 —— 保真度 100%、动画与母版全在，
@@ -395,21 +454,21 @@ async function openInPowerPoint(s: TeachSample) {
 
 /** 做同款：把原课件文件放进输入框附件 + 预填同款提示词，用户可改后一键生成 */
 async function makeSame(s: TeachSample) {
-  if (!s.deckId) {
+  if (!s.deckId && !s.docId) {
     useSample(s);
     return;
   }
   if (cloning.value) return;
   cloning.value = true;
   try {
-    const af = await materializeDeck(s);
+    const af = s.docId ? await materializeDoc(s) : await materializeDeck(s);
     if (!uploads.value.some((u) => u.path === af.path)) uploads.value.push(af);
     input.value = samePrompt(s);
     autoGrow();
     closePreview();
     inputEl.value?.focus();
     document.querySelector(".home-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
-    toast.success(`已把《${s.title}》原课件放入附件，可直接生成同款`);
+    toast.success(`已把《${s.title}》${s.docId ? "原教案" : "原课件"}放入附件，可直接生成同款`);
   } catch (e: any) {
     toast.error(`做同款失败：${e?.message ?? e}`);
   } finally {
@@ -441,6 +500,8 @@ const filteredSamples = computed(() => {
 
 // 封面：有 cover 名则优先真图 .png（codex 生成）缺则回退 .svg；无 cover 名用课件第 1 页截图
 function coverSrc(s: TeachSample) {
+  // 教案封面本就是矢量图(脚本按学科主色生成的 svg),直接给 .svg —— 别走 png 再 404 回退
+  if (s.docId) return `/sample-covers/${s.cover || s.docId}.svg`;
   if (s.cover) return `/sample-covers/${s.cover}.png`;
   return s.deckId ? thumbSrc(s.deckId, 1) : "";
 }
@@ -572,8 +633,12 @@ function onCoverErr(e: Event, s: TeachSample) {
             <img :src="coverSrc(s)" :alt="s.title" loading="lazy" @error="onCoverErr($event, s)" />
             <span class="sc-grade">{{ s.grade }}</span>
             <span v-if="s.pages" class="sc-pages">{{ s.pages }} 页</span>
-            <div v-if="s.deckId" class="sc-hover">
-              <span class="sc-hover-pill"><Eye :size="15" :stroke-width="2" /> 点开看</span>
+            <span v-else-if="s.words" class="sc-pages">{{ Math.round(s.words / 100) / 10 }} 千字</span>
+            <div v-if="s.deckId || s.docId" class="sc-hover">
+              <span class="sc-hover-pill">
+                <component :is="s.docId ? FileText : Eye" :size="15" :stroke-width="2" />
+                {{ s.docId ? "看 Word 版" : "点开看" }}
+              </span>
             </div>
           </div>
           <div class="sc-body">
@@ -585,10 +650,10 @@ function onCoverErr(e: Event, s: TeachSample) {
               </div>
             </div>
             <button
-              v-if="s.deckId"
+              v-if="s.deckId || s.docId"
               class="sc-same"
               :disabled="cloning"
-              title="把这份原课件喂给 AI，生成同款"
+              :title="s.docId ? '把这份原教案喂给 AI，生成同款' : '把这份原课件喂给 AI，生成同款'"
               @click.stop="makeSame(s)"
             >
               <Sparkles :size="13" :stroke-width="2" /> 做同款
@@ -613,7 +678,7 @@ function onCoverErr(e: Event, s: TeachSample) {
               </span>
             </div>
             <div class="pv-head-actions">
-              <button class="pv-fs" title="全屏放映 (Esc 退出)" @click="toggleFullscreen()">
+              <button v-if="!isDocPreview" class="pv-fs" title="全屏放映 (Esc 退出)" @click="toggleFullscreen()">
                 <Maximize :size="15" :stroke-width="2" /> 全屏播放
               </button>
               <button class="pv-x" title="关闭 (Esc)" @click="closePreview()">
@@ -622,7 +687,17 @@ function onCoverErr(e: Event, s: TeachSample) {
             </div>
           </div>
 
-          <div ref="stageEl" class="pv-stage" :class="{ fs: isFs }" @click="onStageClick">
+          <!-- 教案范例:真 Word 版纸张预览(只读)。与编辑器同一个 DocViewer —— 这里看到的
+               排版就是「做同款」之后能逐段改的那份,不是另做一套只能看的死图。 -->
+          <div v-if="isDocPreview" class="pv-doc">
+            <div v-if="docLoading" class="pv-doc-state">
+              <Loader :size="20" class="spin" /> 正在载入教案…
+            </div>
+            <DocViewer v-else-if="docSpec" :spec="docSpec" :editable="false" />
+            <div v-else class="pv-doc-state">教案载入失败，可点下方「用 Word 打开」看原文件</div>
+          </div>
+
+          <div v-if="!isDocPreview" ref="stageEl" class="pv-stage" :class="{ fs: isFs }" @click="onStageClick">
             <button class="pv-nav prev" :disabled="page <= 1" @click.stop="flip(-1)">
               <ChevronLeft :size="22" :stroke-width="2" />
             </button>
@@ -637,7 +712,7 @@ function onCoverErr(e: Event, s: TeachSample) {
             <span v-if="isFs" class="pv-fs-count">{{ page }} / {{ preview.pages }} · 点击翻页 · Esc 退出</span>
           </div>
 
-          <div class="pv-thumbs">
+          <div v-if="!isDocPreview" class="pv-thumbs">
             <button
               v-for="n in preview.pages || 0"
               :key="n"
@@ -650,10 +725,22 @@ function onCoverErr(e: Event, s: TeachSample) {
           </div>
 
           <div class="pv-foot">
-            <span class="pv-count">{{ page }} / {{ preview.pages }}</span>
+            <span v-if="isDocPreview" class="pv-count">{{ preview.words ? `${preview.words} 字` : "教案范例" }}</span>
+            <span v-else class="pv-count">{{ page }} / {{ preview.pages }}</span>
             <div class="pv-actions">
               <button
-                v-if="isTauri"
+                v-if="isTauri && isDocPreview"
+                class="pv-btn ghost"
+                :disabled="opening"
+                title="用系统里的 Word 打开原教案：保真度 100%"
+                @click="openInWord(preview!)"
+              >
+                <Loader v-if="opening" :size="15" class="spin" />
+                <FileText v-else :size="15" :stroke-width="2" />
+                用 Word 打开
+              </button>
+              <button
+                v-else-if="isTauri"
                 class="pv-btn ghost"
                 :disabled="opening"
                 title="用系统里的 PowerPoint 打开原课件：保真度 100%，动画与母版都在"
@@ -663,8 +750,8 @@ function onCoverErr(e: Event, s: TeachSample) {
                 <MonitorPlay v-else :size="15" :stroke-width="2" />
                 用 PowerPoint 放映
               </button>
-              <button class="pv-btn ghost" title="不带原文件，只用这课的提示词生成同类课件" @click="useSample(preview!); closePreview()">只借思路生成</button>
-              <button class="pv-btn primary" :disabled="cloning" title="把这份原课件作为参考附件喂给 AI" @click="makeSame(preview!)">
+              <button class="pv-btn ghost" :title="isDocPreview ? '不带原文件，只用这课的提示词生成同类教案' : '不带原文件，只用这课的提示词生成同类课件'" @click="useSample(preview!); closePreview()">只借思路生成</button>
+              <button class="pv-btn primary" :disabled="cloning" :title="isDocPreview ? '把这份原教案作为参考附件喂给 AI' : '把这份原课件作为参考附件喂给 AI'" @click="makeSame(preview!)">
                 <Loader v-if="cloning" :size="15" class="spin" />
                 <Sparkles v-else :size="15" :stroke-width="2" />
                 做同款
@@ -710,9 +797,11 @@ function onCoverErr(e: Event, s: TeachSample) {
      结果输入卡被 chip 行的宽度勒住（真踩过：设了 1280 仍只有 ~630）。 */
   width: 100%;
   max-width: 1560px;
-  /* 下内边距把「问候+chip+输入卡」这一整组从正中再上提一档，
-     输入卡落在页面中上部，不贴底（贴底是旧构建的样子）。 */
-  padding: 24px 36px 120px;
+  /* justify-content:center 是按「内边距盒」居中的，所以上内边距比下内边距大多少，
+     整组就往下挪多少的一半。这里用 18vh 让下移量随窗口高度走（矮窗口自动收敛，
+     不会把输入卡顶出视口），220px 封顶。对标 WorkBuddy 首页：输入卡中心落在
+     视口高度约 2/3 处 —— 不贴底，也不飘在上半部。 */
+  padding: min(18vh, 220px) 36px 24px;
 }
 /* 这一组内部的节奏：标题 → chip → 输入卡，间距收紧成一个整体 */
 .home.chat .hero-title {
@@ -727,7 +816,7 @@ function onCoverErr(e: Event, s: TeachSample) {
   padding: 26px 26px 16px;
 }
 .home.chat .composer textarea {
-  min-height: 72px;
+  min-height: 84px;
 }
 
 /* ── Hero：工坊版式标题左对齐；chat 版式居中问候 ── */
@@ -1346,6 +1435,22 @@ function onCoverErr(e: Event, s: TeachSample) {
   object-fit: contain;
   display: block;
   max-height: 64vh;
+}
+/* 教案范例：真 Word 版纸张预览（DocViewer 自带深底与左大纲栏） */
+.pv-doc {
+  display: flex;
+  min-height: 0;
+  height: 66vh;
+  background: #3a3a3f;
+}
+.pv-doc-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 13px;
 }
 /* 全屏放映态：图占满屏，点击翻页 */
 .pv-stage.fs {

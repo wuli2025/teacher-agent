@@ -30,6 +30,16 @@ export interface TeachSample {
   fileName?: string;
   /** 课件页数（预览翻页用） */
   pages?: number;
+  /**
+   * 原教案 id：有则可「看 Word 版」与「做同款」。与 deckId 互斥（一个范例要么是课件要么是教案）。
+   *   原文件  /sample-doc-files/<docId>.docx   —— 「做同款」喂给对话作参考附件；「用 Word 打开」也用它
+   *   源  稿  /sample-docs/<docId>.json        —— 预览用的 polaris.doc.json，喂 DocViewer 渲染成真纸张
+   * 教案是流式长文档，没有「逐页截图」这回事：预览走渲染器而不是图片，因此点开看到的
+   * 就是能改的那份（与 PPT 的截图预览是有意的不同）。
+   */
+  docId?: string;
+  /** 教案字数（卡片角标与预览页脚用） */
+  words?: number;
 }
 
 export interface ModeDef {
@@ -128,12 +138,52 @@ const MATH_SAMPLES: TeachSample[] = withDecks([
   { id: "m_angle", title: "角的度量", subtitle: "量角器 · 度数", cover: "pri_math_angle", grade: "小学", by: "数学", prompt: "生成一份《角的度量》数学课件，含角的概念、量角器读数步骤与易错辨析。" },
 ]);
 
-// ─────────── AI 教案：取几套真课件主题作教案示例 ───────────
-const LESSON_SAMPLES: TeachSample[] = withDecks([
-  { id: "lp_beiying", title: "《背影》教学设计", subtitle: "评价任务 · 教学流程", cover: "chinese_beiying", grade: "初中", by: "语文", prompt: "为朱自清《背影》写一份完整教案，含教学目标、重难点、教学过程与板书设计。" },
-  { id: "lp_qinyuanchun", title: "《沁园春·长沙》教案", subtitle: "学情分析 · 课时安排", cover: "senior_chinese_qinyuanchun", grade: "高中", by: "语文", prompt: "为《沁园春·长沙》写一份完整教案，含学情分析、诵读设计与意象探究活动。" },
-  { id: "lp_photosynthesis", title: "光合作用 · 教案", subtitle: "实验探究 · 概念建构", cover: "bio_photosynthesis", grade: "初中", by: "生物", prompt: "为《绿色植物的光合作用》写一份完整教案，含探究实验设计、教学过程与作业。" },
-  { id: "lp_opium", title: "《鸦片战争》教案", subtitle: "史料 · 家国情怀", cover: "history_opium", grade: "初中", by: "历史", prompt: "为《鸦片战争》写一份完整教案，含史料研读、时间线梳理与家国情怀渗透。" },
+// ─────────── AI 教案：15 篇高中青教赛范式真教案（Word 原稿 + 可编辑源稿）───────────
+// 真源登记表：docId → 原文件名 + 字数。原文件在 public/sample-doc-files/<docId>.docx,
+// 预览用的源稿在 public/sample-docs/<docId>.json（polaris.doc.json 结构，喂 DocViewer）。
+// 与 DECKS 分表而不合表：课件按「页」计、教案按「字」计，卡片角标与预览形态都不同。
+const DOCS: Record<string, { fileName: string; words: number }> = {
+  lesson_math_derivative: { fileName: "01_数学_导数与函数单调性极值最值(高考一轮专题).docx", words: 2487 },
+  lesson_math_ellipse_chord: { fileName: "02_数学_直线与椭圆的位置关系及弦长问题(高考冲刺专题).docx", words: 2646 },
+  lesson_math_series_sum: { fileName: "03_数学_数列求和之错位相减与裂项相消(专题突破).docx", words: 2516 },
+  lesson_math_trig_identity: { fileName: "04_数学_三角恒等变换与求值(高考专题).docx", words: 2648 },
+  lesson_math_distribution: { fileName: "05_数学_二项分布与正态分布(高考概率统计专题).docx", words: 2304 },
+  lesson_english_continuation: { fileName: "06_英语_读后续写情节构建与语言升级(高考写作专题).docx", words: 2125 },
+  lesson_english_grammar_fill: { fileName: "07_英语_语法填空解题策略(高考专题).docx", words: 1882 },
+  lesson_english_inference: { fileName: "08_英语_阅读理解推理判断题解题策略(高考专题).docx", words: 1965 },
+  lesson_english_summary: { fileName: "09_英语_概要写作Summary Writing(高考写作专题).docx", words: 1876 },
+  lesson_chinese_poetry_diction: { fileName: "10_语文_古代诗歌鉴赏之炼字炼句(高考专题).docx", words: 1857 },
+  lesson_chinese_classical_translation: { fileName: "11_语文_文言文翻译得分点突破(高考专题).docx", words: 1776 },
+  lesson_politics_contradiction: { fileName: "12_政治_用对立统一观点看问题(矛盾分析法·高考专题).docx", words: 1885 },
+  lesson_history_xinhai: { fileName: "13_历史_辛亥革命与中华民国的建立(高考专题).docx", words: 2013 },
+  lesson_geography_weather_system: { fileName: "14_地理_常见天气系统之锋与气旋(高考专题).docx", words: 1899 },
+  lesson_physics_magnetic_field: { fileName: "15_物理_带电粒子在匀强磁场中的运动(高考专题).docx", words: 2286 },
+};
+
+/** 给教案范例挂上原 Word 真源（范例 id 即 docId）。 */
+function withDocs(list: TeachSample[]): TeachSample[] {
+  return list.map((s) => {
+    const d = DOCS[s.id];
+    return d ? { ...s, docId: s.id, fileName: d.fileName, words: d.words } : s;
+  });
+}
+
+const LESSON_SAMPLES: TeachSample[] = withDocs([
+  { id: "lesson_math_derivative", title: "导数与单调性、极值、最值", subtitle: "含参讨论 · 一轮专题", cover: "lesson_math_derivative", grade: "高中", by: "数学", prompt: "写一份高中数学《导数在函数单调性、极值与最值中的应用》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_math_ellipse_chord", title: "直线与椭圆 · 弦长与中点弦", subtitle: "解析几何 · 冲刺专题", cover: "lesson_math_ellipse_chord", grade: "高中", by: "数学", prompt: "写一份高中数学《直线与椭圆的位置关系及弦长、中点弦问题》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_math_series_sum", title: "数列求和：错位相减与裂项相消", subtitle: "数列 · 方法突破", cover: "lesson_math_series_sum", grade: "高中", by: "数学", prompt: "写一份高中数学《数列求和的核心方法：错位相减与裂项相消》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_math_trig_identity", title: "三角恒等变换与化简求值", subtitle: "公式选择 · 角的变换", cover: "lesson_math_trig_identity", grade: "高中", by: "数学", prompt: "写一份高中数学《三角恒等变换与三角函数的化简求值》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_math_distribution", title: "二项分布与正态分布", subtitle: "概率统计 · 模型辨析", cover: "lesson_math_distribution", grade: "高中", by: "数学", prompt: "写一份高中数学《二项分布与正态分布的辨析与应用》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_english_continuation", title: "读后续写：情节构建与语言升级", subtitle: "Continuation · 写作专题", cover: "lesson_english_continuation", grade: "高中", by: "英语", prompt: "写一份高中英语《读后续写（Continuation Writing）：情节构建与语言升级》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_english_grammar_fill", title: "语法填空解题策略", subtitle: "有无提示词 · 二轮突破", cover: "lesson_english_grammar_fill", grade: "高中", by: "英语", prompt: "写一份高中英语《语法填空（Grammar Filling）解题策略》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_english_inference", title: "阅读理解 · 推理判断题", subtitle: "Inference · 阅读专题", cover: "lesson_english_inference", grade: "高中", by: "英语", prompt: "写一份高中英语《阅读理解之推理判断题（Inference）解题策略》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_english_summary", title: "概要写作：要点提炼与同义改写", subtitle: "Summary · 写作专题", cover: "lesson_english_summary", grade: "高中", by: "英语", prompt: "写一份高中英语《概要写作（Summary Writing）：要点提炼与同义改写》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_chinese_poetry_diction", title: "古代诗歌鉴赏之炼字炼句", subtitle: "诗歌鉴赏 · 答题范式", cover: "lesson_chinese_poetry_diction", grade: "高中", by: "语文", prompt: "写一份高中语文《古代诗歌鉴赏之炼字炼句》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_chinese_classical_translation", title: "文言文翻译得分点突破", subtitle: "采分点 · 直译规范", cover: "lesson_chinese_classical_translation", grade: "高中", by: "语文", prompt: "写一份高中语文《文言文翻译的得分点突破》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_politics_contradiction", title: "用对立统一的观点看问题", subtitle: "矛盾分析法 · 哲学与文化", cover: "lesson_politics_contradiction", grade: "高中", by: "政治", prompt: "写一份高中政治《用对立统一的观点看问题——矛盾分析法》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_history_xinhai", title: "辛亥革命与中华民国的建立", subtitle: "纲要(上) · 主题复习", cover: "lesson_history_xinhai", grade: "高中", by: "历史", prompt: "写一份高中历史《辛亥革命与中华民国的建立》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_geography_weather_system", title: "常见天气系统 · 锋与气旋", subtitle: "锋面 · 气旋反气旋", cover: "lesson_geography_weather_system", grade: "高中", by: "地理", prompt: "写一份高中地理《常见天气系统——锋面、低压（气旋）与高压（反气旋）》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
+  { id: "lesson_physics_magnetic_field", title: "带电粒子在匀强磁场中的运动", subtitle: "定圆心 · 求半径 · 算时间", cover: "lesson_physics_magnetic_field", grade: "高中", by: "物理", prompt: "写一份高中物理《带电粒子在匀强磁场中的运动》的青教赛范式教案，含课标考情、学情分析、教学目标、重难点、教学过程表与分层作业。" },
 ]);
 
 export const MODES: Record<TeachMode, ModeDef> = {
@@ -168,21 +218,14 @@ export const MODES: Record<TeachMode, ModeDef> = {
     hero: "一句话生成{规范教学教案}",
     placeholder: "为朱自清《背影》写一份完整教案…",
     badge: "AI 教案",
-    skillIds: [],
-    goal: "撰写一份规范、可直接使用的教学教案（Markdown/文档）并保存到产物目录",
+    // 与课件同构:教案也走技能 + spec 路线(polaris.doc.json → .docx),
+    // 出的是**能在应用内逐段编辑、一键导出的真 Word**,不再是一段聊天里的 Markdown。
+    skillIds: ["polaris-doc-studio"],
+    goal: "撰写一份规范、可直接使用的教学教案（.docx）并保存到产物目录",
     buildPrompt: (t) =>
-      `请撰写一份规范、可直接拿去上课的【教学教案】，按新课标核心素养导向设计，结构与顺序如下：\n` +
-      `1. 学情分析（本班学生已有基础与可能的障碍）\n` +
-      `2. 教学目标：指向学科核心素养，每条都用可观察可评价的行为动词，不写「了解」「体会」这类无法检测的空目标\n` +
-      `3. 教学重难点\n` +
-      `4. 评价任务：先写「怎么知道学生学会了」，再写「怎么教」——每条目标都要有对应的评价任务\n` +
-      `5. 教学准备\n` +
-      `6. 教学过程：分环节写，每环节含师生活动、设计意图与时间分配，各环节时间加起来等于课时总长\n` +
-      `7. 预设学生典型错误与应对：至少两处，标在对应环节里\n` +
-      `8. 板书要点\n` +
-      `9. 作业设计：遵守双减，总量克制、分层可选，不布置机械重复抄写\n` +
-      `10. 末尾用一句话说明「本课的评价任务如何检测目标达成」\n\n` +
-      `主题：\n\n${t}`,
+      `请使用 polaris-doc-studio 技能，按【青教赛范式】撰写一份规范、可直接拿去上课的【教学教案（.docx，真表格、可编辑）】，` +
+      `十个板块齐全（课标与考情 / 学情 / 教学目标 / 重难点 / 教法学法 / 教学过程四栏表 / 板书设计 / 分层作业 / 教学反思 / 课程思政），` +
+      `教学目标用可观察可评价的行为动词，教学过程每一行的「设计意图」必须写实、不许空话，作业遵守双减分层可选。\n\n主题：\n\n${t}`,
     samples: LESSON_SAMPLES,
   },
   math: {

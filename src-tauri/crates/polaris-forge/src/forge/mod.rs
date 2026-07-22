@@ -9,6 +9,8 @@
 //! 一眼看清「我这环境出 PPT/视频走哪条路、要不要补东西」,而不是跑到一半报错。
 
 pub mod capture; // 工业级化:持久 CDP + 5 档 fallback 链(替 video 的 per-frame CLI)
+pub mod docx_import; // Word 教案工坊 · 逆向:.docx → polaris.doc.json(启发式判块)
+pub mod docx_native; // Word 教案工坊 · 正向:spec → 原生可编辑 .docx(纯 Rust 直写 OOXML)
                  // Figma 往返桥(REST 拉节点树+图片内嵌):设计成品域,分仓规划 v2 同落 polaris-forge 仓
                  // (Phase 0 文件归位; lib.rs 有 crate 根别名保持 `crate::figma_bridge` 旧路径)。
 pub mod figma_bridge;
@@ -398,6 +400,51 @@ pub async fn forge_spec_to_pptx(spec: String, out: String) -> Result<Value, Stri
     tauri::async_runtime::spawn_blocking(move || spec_to_pptx_sync(spec, out))
         .await
         .map_err(|e| format!("生成任务异常退出: {e}"))?
+}
+
+// ───────────── Word 教案工坊(spec ⇄ .docx,与上面 PPT 那对逐条同构) ─────────────
+
+/// spec JSON → 原生可编辑 `.docx` 的同步内核。零浏览器零 Python,三平台恒可用。
+/// `spec` 既可传 JSON 字符串也可传 `.json` 文件路径 —— 与 spec_to_pptx_sync 同一套判定。
+pub fn spec_to_docx_sync(spec: String, out: String) -> Result<Value, String> {
+    // BOM(U+FEFF)不算 whitespace,带 BOM 的 JSON 会被误判成文件路径 → 先剥掉再判
+    // (PPT 侧踩过一次,这里同款处理,别再踩第二遍)。
+    let json = if spec
+        .trim_start_matches('\u{feff}')
+        .trim_start()
+        .starts_with('{')
+    {
+        spec
+    } else {
+        std::fs::read_to_string(&spec).map_err(|e| format!("读 spec 文件 {spec} 失败: {e}"))?
+    };
+    let json = json.trim_start_matches('\u{feff}');
+    crate::forge::docx_native::build_docx_from_spec(json, &out)
+}
+
+/// spec JSON → 原生可编辑 `.docx`。async + spawn_blocking 防大 spec 冻 UI。
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn forge_spec_to_docx(spec: String, out: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || spec_to_docx_sync(spec, out))
+        .await
+        .map_err(|e| format!("生成任务异常退出: {e}"))?
+}
+
+/// `.docx` → spec JSON 的同步内核。抽出的插图落在 docx 同级的 `img/` 下,
+/// spec 里写绝对路径(前端 resolveDocImages 再换成 data URL)。
+pub fn docx_to_spec_sync(path: String) -> Result<Value, String> {
+    crate::forge::docx_import::docx_to_spec(&path, None)
+}
+
+/// `.docx` → spec JSON。async + spawn_blocking:百页教案解析 + 抽图要时间,
+/// 同步命令默认跑主线程会冻 UI(与导出侧同策略)。
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn forge_docx_to_spec(path: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || docx_to_spec_sync(path))
+        .await
+        .map_err(|e| format!("导入任务异常退出: {e}"))?
 }
 
 /// deck.html → .mp4 的同步内核。server 命令路由(本就在阻塞线程池里)直调这里。

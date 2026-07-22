@@ -9,6 +9,11 @@ import { useSpecEdit } from "../composables/useSpecEdit";
 import DeckEditor from "./DeckEditor.vue";
 // 编辑器实例:导出条上的「放映/解锁拖拽」要调它(viewer 现住在 DeckEditor 里)
 const deckEditorRef = ref<InstanceType<typeof DeckEditor> | null>(null);
+import { parseDocLoose, setDocText, applyDocOp, type DocOp } from "../lib/docSpec";
+import { resolveDocImages } from "../lib/docImages";
+// Word 教案编辑器:与 DeckEditor 同构的另一条链路(polaris.doc.json / .docx)
+const DocEditor = defineAsyncComponent(() => import("./DocEditor.vue"));
+const docEditorRef = ref<any>(null);
 import {
   X,
   FolderOpen,
@@ -417,6 +422,231 @@ async function exportDeckPptx() {
   }
 }
 
+// ══════════ Word 教案 spec / .docx → 豆包式文档编辑器(DocEditor) ══════════
+// 与上面那条 PPT 链路逐处同构:同一套「宽容解析 → 内联图 → 组件渲染 → specEdit 事务」。
+// 之所以另起一套 ref 而不是把 deck* 泛化:两者可以**同时存在于一次对话**(一节课既有课件
+// 又有教案),共用状态会互相顶掉;而两条链路各自独立,谁也不会把对方的 spec 写进自己的文件。
+const docSpec = ref<any | null>(null);
+const docSpecPath = ref<string | null>(null);
+const docKey = ref<string>("");
+const docBlocks = ref(0);
+const docxPath = ref<string | null>(null);
+const docExported = ref<string | null>(null);
+const docExporting = ref(false);
+const docError = ref<string | null>(null);
+/** 同目录已有的那份 .docx 才是导出目标 —— 写死新文件名会让用户认识的那份纹丝不动(PPT 侧真踩过)。 */
+async function resolveDocxTarget(specPath: string): Promise<string> {
+  const norm = (s: string) => s.replace(/\\/g, "/");
+  const np = norm(specPath);
+  const dir = np.slice(0, np.lastIndexOf("/") + 1);
+  try {
+    const list = await artifactsApi.list(app.currentConvId ?? undefined);
+    const sibs = list
+      .filter((e) => /\.docx$/i.test(e.name) && norm(e.path).startsWith(dir))
+      .sort((a, b) => b.modified - a.modified);
+    if (sibs.length) return sibs[0].path;
+  } catch {
+    /* 列不出来就走兜底名 */
+  }
+  return specPath.replace(/polaris\.doc\.json$/i, "教案.docx");
+}
+// 正看 .docx 本身时,找同目录的伴生 polaris.doc.json(有它就走编辑器而不是「暂不支持预览」)
+const docxSiblingSpec = ref<string | null>(null);
+watch(
+  () => artifacts.current?.path,
+  async (p) => {
+    docxSiblingSpec.value = null;
+    if (!p || !/\.docx$/i.test(p)) return;
+    try {
+      const norm = (s: string) => s.replace(/\\/g, "/");
+      const dir = norm(p).slice(0, norm(p).lastIndexOf("/") + 1);
+      const list = await artifactsApi.list(app.currentConvId ?? undefined);
+      if (artifacts.current?.path !== p) return; // 竞态:列目录期间已切走
+      const hit = list.find((e) => /^polaris\.doc\.json$/i.test(e.name) && norm(e.path).startsWith(dir));
+      if (hit) docxSiblingSpec.value = hit.path;
+    } catch {
+      /* 找不到伴生 spec 就维持原分支(binary 提示) */
+    }
+  },
+  { immediate: true }
+);
+
+/** spec 文本 → 解析+内联图 → 喂 DocEditor。内容没变(key 相同)就不重复解析。 */
+async function buildDoc(specText: string, specPath: string, expectPayload: unknown) {
+  const key = `${specPath}|${specText}`;
+  if (key === docKey.value) return;
+  const { spec } = parseDocLoose(specText);
+  if (!spec || !Array.isArray(spec.blocks) || !spec.blocks.length) return;
+  await resolveDocImages(spec);
+  if (artifacts.payload !== expectPayload) return; // 竞态:内联图期间已切走
+  docSpec.value = spec;
+  docSpecPath.value = specPath;
+  docKey.value = key;
+  docBlocks.value = spec.blocks.length;
+}
+
+watch(
+  [() => artifacts.payload, docxSiblingSpec],
+  async ([p, sib]) => {
+    docSpec.value = null;
+    docSpecPath.value = null;
+    docKey.value = "";
+    docBlocks.value = 0;
+    docxPath.value = null;
+    docExported.value = null;
+    if (!p) return;
+    if (/^polaris\.doc\.json$/i.test(p.name) && p.text) {
+      await buildDoc(p.text, p.path, p);
+      if (artifacts.payload === p) docxPath.value = await resolveDocxTarget(p.path);
+    } else if (/\.docx$/i.test(p.name) && sib) {
+      docxPath.value = p.path; // 正看 docx 本身:它就是导出目标(覆盖自己)
+      try {
+        const r = await artifactsApi.read(sib as string);
+        if (artifacts.payload !== p) return;
+        if (r?.text) await buildDoc(r.text, sib as string, p);
+      } catch {
+        /* 读不到就维持原分支 */
+      }
+    }
+  },
+  { immediate: true }
+);
+
+const docCandidatePath = computed<string | null>(() => {
+  const cur = artifacts.current;
+  if (!cur) return null;
+  if (/^polaris\.doc\.json$/i.test(cur.name)) return cur.path;
+  if (/\.docx$/i.test(cur.name) && docxSiblingSpec.value) return docxSiblingSpec.value;
+  return null;
+});
+const docGenerating = computed(() => chat.isSending(app.currentConvId ?? null));
+// 生成中且还没有可渲染的块:等待态盖住 loading/error(spec 未落盘时 read 必然报错)
+const docPending = computed(() => docGenerating.value && !!docCandidatePath.value && !docSpec.value);
+// 生成中轮询重读 spec(逐段点亮);生成结束再读最后一次
+async function pollDocSpec() {
+  const sp = docCandidatePath.value;
+  if (!sp) return;
+  if (!artifacts.payload) {
+    if (artifacts.error && !artifacts.loading) await artifacts.refresh();
+    return;
+  }
+  const p = artifacts.payload;
+  try {
+    const r = await artifactsApi.read(sp);
+    if (r?.text && artifacts.payload === p) await buildDoc(r.text, sp, p);
+  } catch {
+    /* 下次轮询再试 */
+  }
+}
+const docPoller = usePolling(pollDocSpec, 3000);
+watch(
+  () => docGenerating.value && !!docCandidatePath.value,
+  (on, was) => {
+    if (on) docPoller.start();
+    else {
+      docPoller.stop();
+      if (was) void pollDocSpec();
+    }
+  }
+);
+// 编辑器要铺满:一出现教案 spec 就把抽屉放大到宽档(工具条+纸张+格式面板才不挤)
+const docAutoExpanded = ref(false);
+watch(
+  () => !!docCandidatePath.value,
+  (isDoc) => {
+    if (isDoc && !artifacts.expanded) {
+      docAutoExpanded.value = true;
+      artifacts.expanded = true;
+    } else if (!isDoc && docAutoExpanded.value) {
+      docAutoExpanded.value = false;
+      artifacts.expanded = false;
+    }
+  },
+  { immediate: true }
+);
+
+// 所有对教案 spec 的改动共用一个事务:读盘 → 改对象 → 写盘 → 刷预览 → 重转 .docx
+const docEdit = useSpecEdit({
+  specPath: () => docSpecPath.value,
+  pptxTarget: async (sp) => {
+    const out = docxPath.value ?? (await resolveDocxTarget(sp));
+    docxPath.value = out;
+    return out;
+  },
+  validate: (o) => Array.isArray(o?.blocks),
+  convert: (sp, out) => artifactsApi.specToDocx(sp, out),
+  onWritten: (text, sp) => buildDoc(text, sp, artifacts.payload),
+  onError: (m) => (docError.value = m),
+});
+function onDocEdit(blockIdx: number, path: string, value: string) {
+  docError.value = null;
+  void docEdit.mutate((obj) => {
+    if (!obj?.blocks?.[blockIdx]) throw new Error("spec 结构不符");
+    return setDocText(obj.blocks[blockIdx], path, value); // 没改动/路径不符:静默跳过
+  });
+}
+function onDocOp(op: DocOp) {
+  docError.value = null;
+  void docEdit.mutate((obj) => applyDocOp(obj, op));
+}
+// 教案编辑同样默认铺满窗口;「退出全屏」让出左列露出对话,边聊边改
+const docMax = ref(true);
+const docChat = ref(false);
+function toggleDocChat() {
+  docChat.value = !docChat.value;
+  if (docChat.value && app.view !== "chat") app.setView("chat");
+}
+watch(
+  () => docChat.value && docMax.value && !!docSpec.value,
+  (on) => (app.deckChatSplit = on)
+);
+// 换了 spec 文件:旧撤销栈会把上一份内容写进新文件 —— 必须清
+watch(docSpecPath, () => docEdit.resetHistory());
+// 任意 .docx → 可编辑源稿。产出的 polaris.doc.json 落在同目录(与 AI 生成的教案同名同位),
+// 于是 docxSiblingSpec 立刻能认出来,预览自动切进编辑器 —— 导入之后两条路彻底合流。
+const isDocx = computed(() => /\.docx$/i.test(artifacts.current?.name ?? ""));
+const docImporting = ref(false);
+async function importDocx() {
+  const p = artifacts.current?.path;
+  if (!p || docImporting.value) return;
+  docImporting.value = true;
+  docError.value = null;
+  try {
+    const r = await artifactsApi.docxToSpec(p);
+    const text = typeof r?.spec === "string" ? r.spec : JSON.stringify(r?.spec ?? {}, null, 2);
+    const norm = p.replace(/\\/g, "/");
+    const target = norm.slice(0, norm.lastIndexOf("/") + 1) + "polaris.doc.json";
+    await artifactsApi.write(target, text);
+    docxPath.value = p; // 导出目标 = 这份原文件(改完覆盖它,而不是另起一份)
+    await buildDoc(text, target, artifacts.payload);
+    docSpecPath.value = target;
+    await artifacts.refresh(); // 让产物列表看见新源稿
+  } catch (e: any) {
+    docError.value = `解析 Word 失败：${e?.message ?? e}`;
+  } finally {
+    docImporting.value = false;
+  }
+}
+
+async function exportDocx() {
+  const sp = docSpecPath.value;
+  if (!sp || docExporting.value) return;
+  docExporting.value = true;
+  docError.value = null;
+  docExported.value = null;
+  try {
+    const out = docxPath.value ?? (await resolveDocxTarget(sp));
+    await artifactsApi.specToDocx(sp, out);
+    docxPath.value = out;
+    docExported.value = out.replace(/\\/g, "/").split("/").pop() ?? "";
+    await artifactsApi.reveal(out);
+  } catch (e: any) {
+    docError.value = `导出 Word 失败：${e?.message ?? e}`;
+  } finally {
+    docExporting.value = false;
+  }
+}
+
 const headIcon = computed(() => {
   const k = artifacts.payload?.kind;
   if (k === "html" || k === "svg") return FileCode;
@@ -612,6 +842,10 @@ function fmtSize(n: number): string {
           <Loader :size="22" :stroke-width="1.6" class="spin" />
           <span>课件生成中…第一页出来就会显示</span>
         </div>
+        <div v-else-if="docPending" class="pv-state">
+          <Loader :size="22" :stroke-width="1.6" class="spin" />
+          <span>教案生成中…第一段出来就会显示</span>
+        </div>
         <div v-else-if="artifacts.loading" class="pv-state">
           <Loader :size="22" :stroke-width="1.6" class="spin" />
           <span>正在加载…</span>
@@ -694,6 +928,64 @@ function fmtSize(n: number): string {
               @undo="specEdit.undo()"
             />
           </div>
+          <!-- Word 教案 spec / .docx → 豆包式文档编辑器(与 PPT 那条同构,预览即导出)。
+               同样必须排在 text/binary 分支前:spec 是 kind=text、.docx 是 kind=binary。 -->
+          <div v-else-if="docSpec" class="pv-deck" :class="{ full: docMax, chat: docMax && docChat }">
+            <div v-if="docError" class="pv-deck-err">{{ docError }}</div>
+            <div class="pv-deck-bar">
+              <span v-if="docMax" class="pv-deck-file" :title="artifacts.payload?.name">{{ artifacts.payload?.name }}</span>
+              <span v-if="docGenerating" class="pv-deck-live">
+                <Loader :size="12" :stroke-width="1.8" class="spin" /> 生成中 · 已出 {{ docBlocks }} 段
+              </span>
+              <!-- 导出回执:明说存成了哪个文件 —— 否则用户以为「没保存」 -->
+              <span v-else-if="docExported" class="pv-deck-ok">已保存到 {{ docExported }}</span>
+              <span v-else class="pv-deck-hint">原生可编辑 Word · 预览即导出</span>
+              <div class="pv-deck-acts">
+                <button
+                  class="pv-deck-edit"
+                  :disabled="!docBlocks"
+                  title="全屏通读（F5 · Esc 退出）"
+                  @click="docEditorRef?.present()"
+                >
+                  <Play :size="13" :stroke-width="1.8" />
+                  <span>阅读</span>
+                </button>
+                <button
+                  class="pv-deck-export"
+                  :disabled="docExporting || docGenerating"
+                  :title="docGenerating ? '生成完成后可导出' : '无条件重转并在文件夹中定位'"
+                  @click="exportDocx()"
+                >
+                  <Loader v-if="docExporting" :size="13" :stroke-width="1.8" class="spin" />
+                  <Download v-else :size="13" :stroke-width="1.8" />
+                  <span>{{ docExporting ? "导出中…" : "导出 Word" }}</span>
+                </button>
+                <button
+                  class="pv-deck-edit"
+                  :title="docChat ? '收起对话，纸张铺满窗口' : '退出全屏：左侧露出对话框，边聊边改'"
+                  @click="toggleDocChat"
+                >
+                  <component :is="docChat ? Maximize2 : Minimize2" :size="13" :stroke-width="1.8" />
+                  <span>{{ docChat ? "全屏" : "退出全屏" }}</span>
+                </button>
+                <button v-if="docMax" class="pv-deck-edit" title="关闭编辑器" @click="artifacts.close()">
+                  <X :size="14" :stroke-width="2" />
+                </button>
+              </div>
+            </div>
+            <DocEditor
+              ref="docEditorRef"
+              class="pv-deck-viewer"
+              :spec="docSpec"
+              :generating="docGenerating"
+              :editable="!docGenerating"
+              :full="docMax && !docChat"
+              :can-undo="docEdit.canUndo.value"
+              @edit="onDocEdit"
+              @op="onDocOp"
+              @undo="docEdit.undo()"
+            />
+          </div>
           <!-- HTML / SVG → iframe 完整渲染 -->
           <iframe
             v-else-if="
@@ -727,7 +1019,15 @@ function fmtSize(n: number): string {
           <!-- 其它二进制 -->
           <div v-else class="pv-state">
             <FileIcon :size="26" :stroke-width="1.4" />
-            <span>该文件类型暂不支持内嵌预览</span>
+            <span>{{ isDocx ? "这是一份 Word 文档" : "该文件类型暂不支持内嵌预览" }}</span>
+            <!-- 任意 .docx（别人发来的教案、自己以前写的）也能进编辑器:先解析成可编辑源稿,
+                 此后与 AI 生成的教案走完全同一条链路(点字直改 / 换主题 / 一键导回 .docx)。 -->
+            <button v-if="isDocx" class="pv-open-ext primary" :disabled="docImporting" @click="importDocx()">
+              <Loader v-if="docImporting" :size="14" :stroke-width="1.8" class="spin" />
+              <PencilLine v-else :size="14" :stroke-width="1.8" />
+              <span>{{ docImporting ? "正在解析…" : "转成可编辑源稿并打开" }}</span>
+            </button>
+            <span v-if="docError" class="pv-deck-err">{{ docError }}</span>
             <button
               v-if="isPptx && pptxDeckHtml"
               class="pv-open-ext primary"
