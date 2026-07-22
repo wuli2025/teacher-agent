@@ -77,9 +77,7 @@ function useDefault() {
     <section class="block">
       <div class="b-title">外观</div>
       <div class="b-desc">
-        浅色=暖白水墨；黑夜=石墨炭黑；护眼=淡绿纸感(低刺激、文字对比不降)；
-        「极光琉璃」两套=内容保持干净、只把
-        画框做成琉璃质感:软白画框(浅底+彩虹极光边)、墨黑灰框(深底+中性灰边、不突兀)。
+        设计稿三档:浅色=暖白水墨；深色=墨黑；护眼=米色纸感(低刺激、文字对比不降)。
         切换立即生效并记住选择。
       </div>
       <div class="theme-row">
@@ -103,7 +101,7 @@ function useDefault() {
             <span class="sw-side"></span>
             <span class="sw-main"><span class="sw-card"></span></span>
           </span>
-          <span class="theme-name">黑夜 · 石墨炭黑</span>
+          <span class="theme-name">深色 · 墨黑</span>
         </button>
         <button
           class="theme-card"
@@ -114,31 +112,7 @@ function useDefault() {
             <span class="sw-side"></span>
             <span class="sw-main"><span class="sw-card"></span></span>
           </span>
-          <span class="theme-name">护眼 · 淡绿纸感</span>
-        </button>
-        <button
-          class="theme-card"
-          :class="{ active: app.theme === 'aurora-light' }"
-          @click="app.setTheme('aurora-light')"
-        >
-          <span class="theme-swatch aurora-light-sw">
-            <span class="sw-aurora"></span>
-            <span class="sw-side"></span>
-            <span class="sw-main"><span class="sw-card"></span></span>
-          </span>
-          <span class="theme-name">极光琉璃 · 软白画框</span>
-        </button>
-        <button
-          class="theme-card"
-          :class="{ active: app.theme === 'aurora-dark' }"
-          @click="app.setTheme('aurora-dark')"
-        >
-          <span class="theme-swatch aurora-dark-sw">
-            <span class="sw-aurora"></span>
-            <span class="sw-side"></span>
-            <span class="sw-main"><span class="sw-card"></span></span>
-          </span>
-          <span class="theme-name">极光琉璃 · 墨黑灰框</span>
+          <span class="theme-name">护眼 · 米色纸感</span>
         </button>
       </div>
     </section>
@@ -446,87 +420,24 @@ function useDefault() {
   border: 1px solid rgba(190, 182, 162, 0.6);
 }
 .dark-sw {
-  background: #181818;
+  background: #141414;
 }
 .dark-sw .sw-side {
   background: #1f1f1f;
 }
 .dark-sw .sw-card {
-  background: rgba(43, 43, 41, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #3a3a3a;
+  border: 1px solid rgba(237, 236, 234, 0.14);
 }
 .eyecare-sw {
-  background: #f2f7ee;
+  background: #faf4e3;
 }
 .eyecare-sw .sw-side {
-  background: #e8f0e2;
+  background: #ebe5d1;
 }
 .eyecare-sw .sw-card {
-  background: #f9fcf5;
-  border: 1px solid rgba(150, 172, 132, 0.55);
-}
-/* 极光琉璃·软白画框：内容干净软白，画框(侧栏/四周)透出彩虹极光 */
-.aurora-light-sw {
-  position: relative;
-  background: #f6f8fd;
-  border-color: rgba(160, 140, 220, 0.45);
-  box-shadow: 0 0 0 1.5px rgba(180, 160, 245, 0.35);
-}
-.aurora-light-sw .sw-aurora {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  filter: blur(11px) saturate(150%);
-  background: radial-gradient(44% 60% at 8% 16%, #ff8fc8dd, transparent 66%),
-    radial-gradient(40% 52% at 4% 92%, #9d8bffdd, transparent 66%),
-    radial-gradient(38% 46% at 0% 50%, #74d4ffcc, transparent 70%),
-    radial-gradient(30% 40% at 100% 88%, #ffd27abb, transparent 70%);
-}
-.aurora-light-sw .sw-side {
-  position: relative;
-  z-index: 1;
-  background: rgba(255, 255, 255, 0.32);
-}
-.aurora-light-sw .sw-main {
-  position: relative;
-  z-index: 1;
-  background: #fdfdfb; /* 内容干净软白 */
-  margin: 4px;
-  border-radius: 6px;
-}
-.aurora-light-sw .sw-card {
-  background: #ffffff;
-  border: 1px solid rgba(180, 160, 240, 0.5);
-}
-/* 极光琉璃·墨黑灰框：内容干净墨黑，画框中性灰、收敛不突兀 */
-.aurora-dark-sw {
-  position: relative;
-  background: #161616;
-  border-color: rgba(255, 255, 255, 0.16);
-}
-.aurora-dark-sw .sw-aurora {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  filter: blur(11px) saturate(35%) brightness(0.7);
-  background: radial-gradient(46% 60% at 6% 18%, #9aa6c0aa, transparent 68%),
-    radial-gradient(40% 50% at 2% 90%, #7e8aa088, transparent 70%);
-}
-.aurora-dark-sw .sw-side {
-  position: relative;
-  z-index: 1;
-  background: rgba(120, 124, 134, 0.28);
-}
-.aurora-dark-sw .sw-main {
-  position: relative;
-  z-index: 1;
-  background: #181818; /* 内容干净墨黑 */
-  margin: 4px;
-  border-radius: 6px;
-}
-.aurora-dark-sw .sw-card {
-  background: #232322;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #eee9d5;
+  border: 1px solid rgba(153, 153, 153, 0.44);
 }
 .theme-name {
   font-size: 12px;

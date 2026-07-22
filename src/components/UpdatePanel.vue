@@ -51,15 +51,15 @@ const lastChecked = computed(() => {
   <div class="up-panel">
     <header class="up-header">
       <h1>更新</h1>
-      <p class="up-sub">保持教师助手为最新版本</p>
+      <p class="up-sub">保持微光为最新版本</p>
     </header>
 
     <div class="up-body">
       <!-- 当前版本 -->
       <div class="ver-card">
-        <img class="ver-logo" src="../assets/logo.png" alt="教师助手" />
+        <img class="ver-logo" src="../assets/logo.png" alt="微光" />
         <div class="ver-meta">
-          <div class="ver-name">教师助手</div>
+          <div class="ver-name">微光</div>
           <div class="ver-num">当前版本 v{{ currentVersion || "—" }}</div>
         </div>
         <button

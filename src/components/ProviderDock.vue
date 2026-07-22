@@ -63,19 +63,13 @@ const updToast = ref<UpdToast | null>(null);
 /** 退出确认弹窗(设计稿 §4) */
 const exitAsk = ref(false);
 
-/** 主题分段控件 —— 对齐设计稿设置弹层的三档「浅色/深色/护眼」。
- *  极光琉璃两套仍在 设置 页完整可选,这里不占分段。 */
+/** 主题分段控件 —— 对齐设计稿设置弹层的三档「浅色/深色/护眼」(全应用仅此三档) */
 const themeSegs = [
   { key: "light", label: "浅色" },
   { key: "dark", label: "深色" },
   { key: "eyecare", label: "护眼" },
 ] as const;
-/** 极光两套没有独立分段:按明暗归到「浅色/深色」高亮,避免出现一段都不亮的空档 */
-const themeSeg = computed(() => {
-  if (app.theme === "aurora-dark") return "dark";
-  if (app.theme === "aurora-light") return "light";
-  return app.theme;
-});
+const themeSeg = computed(() => app.theme);
 
 function openSettings() {
   const r = acctEl.value?.getBoundingClientRect();

@@ -204,7 +204,7 @@ jobs:
           entry = {"signature": mac_sig_text, "url": mac_url}
           out = {
               "version": version,
-              "notes": f"教师助手 {version}",
+              "notes": f"微光 {version}",
               "pub_date": datetime.datetime.now(datetime.timezone.utc)
                   .strftime("%Y-%m-%dT%H:%M:%SZ"),
               "platforms": {
@@ -226,7 +226,7 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
-          name: 教师助手 ${{ github.ref_name }}
+          name: 微光 ${{ github.ref_name }}
           prerelease: false
           # 必须是 latest release,应用端读的是 /releases/latest/download/latest.json
           make_latest: true

@@ -79,22 +79,15 @@ export const useAppStore = defineStore("app", () => {
   // 主题：浅色（默认·暖白水墨）/ 黑夜（深空玻璃，抄自智能选股版）。
   // 挂到 <html data-theme="dark"> 上由 style.css 的 token 覆盖块全局换肤。
   const THEME_KEY = "polaris.theme.v1";
-  // light=软白水墨 / dark=墨黑 / eyecare=护眼淡绿 / aurora-light=软白+极光画框 / aurora-dark=墨黑+灰画框
-  type Theme = "light" | "dark" | "eyecare" | "aurora-light" | "aurora-dark";
+  // 设计稿三档:light=浅色暖白 / dark=深色墨黑(#141414系) / eyecare=护眼米色纸感(#FAF4E3系)
+  type Theme = "light" | "dark" | "eyecare";
   function loadTheme(): Theme {
     try {
       const t = localStorage.getItem(THEME_KEY);
-      if (
-        t === "light" ||
-        t === "dark" ||
-        t === "eyecare" ||
-        t === "aurora-light" ||
-        t === "aurora-dark"
-      )
-        return t;
-      if (t === "nougat") return "aurora-light"; // 旧键迁移
-      // 未选择过 → 浅色平铺（2026-07 设计稿复刻：齐边无画框、无极光）。
-      // 极光画框仍在设置里可选，只是不再是默认。
+      if (t === "light" || t === "dark" || t === "eyecare") return t;
+      // 旧主题迁移:极光琉璃两套已下架,按明暗归位;nougat 是更早的旧键
+      if (t === "aurora-dark") return "dark";
+      if (t === "aurora-light" || t === "nougat") return "light";
       return "light";
     } catch {
       return "light";
@@ -112,10 +105,8 @@ export const useAppStore = defineStore("app", () => {
     if (isTauri) {
       const titlebar: Record<Theme, { caption: string; text: string }> = {
         light: { caption: "#f3f2eb", text: "#1a1a1c" }, // 暖米框面，与侧栏无色差
-        dark: { caption: "#1f1f1f", text: "#ececea" }, // 石墨框面
-        eyecare: { caption: "#e8f0e2", text: "#1a1a1c" }, // 护眼淡绿框面，与侧栏无色差
-        "aurora-light": { caption: "#eef1fa", text: "#232436" }, // 珠光浅画框
-        "aurora-dark": { caption: "#1c1d20", text: "#ececea" }, // 墨黑+灰画框
+        dark: { caption: "#1f1f1f", text: "#ffffff" }, // 墨黑框面(设计稿侧栏色)
+        eyecare: { caption: "#ebe5d1", text: "#1a1a1c" }, // 护眼米色框面，与侧栏无色差
       };
       invoke("set_titlebar_color", titlebar[theme.value]).catch(() => {});
     }

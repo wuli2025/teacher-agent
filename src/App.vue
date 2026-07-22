@@ -199,53 +199,8 @@ onBeforeUnmount(() => {
   unWsStatus?.();
   if (trimTimer !== undefined) clearInterval(trimTimer);
   clearTimeout(loaderSafety);
-  window.removeEventListener("mousemove", onAuroraPointer);
   document.removeEventListener("visibilitychange", onVisibilityTrim);
-  if (edgeRaf) cancelAnimationFrame(edgeRaf);
 });
-
-// ─────────── 极光主题：彩虹边框高光跟随鼠标方位游走 ───────────
-// mousemove 用 rAF 合帧(一帧最多算一次)，把鼠标相对主面板中心的方位角写进
-// CSS 变量 --edge-angle，style.css 里的 conic 亮带就锚在该方位 → 边框上那一段亮起。
-// 仅极光两套主题挂监听；切走主题即摘掉，零常驻开销。
-let mainEl: HTMLElement | null = null;
-let edgeRaf = 0;
-let edgePx = 0;
-let edgePy = 0;
-function flushEdge() {
-  edgeRaf = 0;
-  mainEl ||= document.querySelector(".main");
-  if (!mainEl) return;
-  const r = mainEl.getBoundingClientRect();
-  const cx = r.left + r.width / 2;
-  const cy = r.top + r.height / 2;
-  // conic 0deg 指向正上、顺时针递增；atan2 0 指向右(屏幕 y 向下) → +90° 对齐
-  const deg = (Math.atan2(edgePy - cy, edgePx - cx) * 180) / Math.PI + 90;
-  mainEl.style.setProperty("--edge-angle", `${deg.toFixed(1)}deg`);
-}
-function onAuroraPointer(e: MouseEvent) {
-  edgePx = e.clientX;
-  edgePy = e.clientY;
-  if (!edgeRaf) edgeRaf = requestAnimationFrame(flushEdge);
-}
-const isAurora = computed(
-  () => app.theme === "aurora-light" || app.theme === "aurora-dark"
-);
-watch(
-  isAurora,
-  (on) => {
-    if (on) {
-      window.addEventListener("mousemove", onAuroraPointer, { passive: true });
-    } else {
-      window.removeEventListener("mousemove", onAuroraPointer);
-      if (edgeRaf) {
-        cancelAnimationFrame(edgeRaf);
-        edgeRaf = 0;
-      }
-    }
-  },
-  { immediate: true }
-);
 
 // 全局快捷键:Ctrl+N 新对话 / Ctrl+K 命令面板 / Ctrl+B 收侧栏
 useHotkeys();
@@ -343,14 +298,6 @@ function startSbDrag(e: MouseEvent) {
 
 <template>
   <div class="shell" :class="{ 'sb-drag': sbDragging || app.drawerResizing }" :style="{ gridTemplateColumns: layoutCols }">
-    <!-- 极光琉璃画框主题：虚幻极光 + 颗粒背景层（fixed，居于全部内容之下，
-         内容面板不透明遮住中央 → 极光只在画框带透出；浅/深两版共用） -->
-    <template v-if="app.theme === 'aurora-light' || app.theme === 'aurora-dark'">
-      <div class="aurora" aria-hidden="true">
-        <span class="a1"></span><span class="a2"></span><span class="a3"></span><span class="a4"></span><span class="a5"></span>
-      </div>
-      <div class="grain" aria-hidden="true"></div>
-    </template>
     <Sidebar />
     <main class="main">
       <!-- 侧栏宽度拖拽分隔条 -->
@@ -457,9 +404,8 @@ function startSbDrag(e: MouseEvent) {
 <style scoped>
 /* 连屏一体化边框（仿 Codex）：整个 shell 是一块连续的框面（侧栏+顶部+四周同色），
    主区/右抽屉是嵌在框里的圆角面板 —— 上边框与左边框在面板左上圆角处汇合 */
-/* 2026-07 设计稿复刻：默认（浅色/深色）不再做「悬浮画框」——侧栏与主区齐边平铺、
-   无顶部框带、无圆角、无缝隙，靠 #F2F2F2 / #FAFAFA 的一档色差分区。
-   极光两套主题仍保留画框（下方 aurora 覆盖块把留白与圆角加回去）。 */
+/* 2026-07 设计稿复刻：三档主题（浅色/深色/护眼）都齐边平铺——侧栏与主区
+   无顶部框带、无圆角、无缝隙，靠侧栏/主区一档色差分区。 */
 .shell {
   height: 100vh;
   display: grid;

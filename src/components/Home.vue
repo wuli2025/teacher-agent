@@ -694,20 +694,40 @@ function onCoverErr(e: Event, s: TeachSample) {
   margin: 0 auto;
   padding: 40px 24px 80px;
 }
-/* chat 版式（新建对话通用助手，设计稿 1-新建对话主页）：纵向铺满，问候居中、输入卡沉到底部。
-   用 flex:1 + min-height:0 撑满滚动容器高度（min-height:100% 在 flex 链里不稳定，故改此法）。 */
+/* chat 版式（新建对话通用助手）：问候 + chip + 输入卡当作**一整组**垂直居中，
+   再靠较大的下内边距把这组整体上提一档（视觉重心略高于正中，比沉底更聚拢好看）。
+   用 flex:1 + min-height:0 撑满滚动容器高度（min-height:100% 在 flex 链里不稳定）。 */
 .home.chat {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 24px 24px 30px;
+  justify-content: center;
+  /* 比工坊版式更宽：输入卡几乎横撑到内容区左右两边，只留一档呼吸的边距。
+     1560 只是超宽屏上的兜底封顶，常规窗口下等同于满宽。
+     ⚠ width:100% 不能省 —— .home 是 flex 项且带 margin:0 auto，
+     横向 auto 边距会让它退化成「按内容收缩」，max-width 只封顶不给宽，
+     结果输入卡被 chip 行的宽度勒住（真踩过：设了 1280 仍只有 ~630）。 */
+  width: 100%;
+  max-width: 1560px;
+  /* 下内边距把「问候+chip+输入卡」这一整组从正中再上提一档，
+     输入卡落在页面中上部，不贴底（贴底是旧构建的样子）。 */
+  padding: 24px 36px 120px;
 }
-.home.chat .hero-block {
-  margin-top: auto;
+/* 这一组内部的节奏：标题 → chip → 输入卡，间距收紧成一个整体 */
+.home.chat .hero-title {
+  font-size: 34px;
+  line-height: 48px;
 }
-.home.chat .composer-wrap {
-  margin-top: auto;
+.home.chat .quick-chips {
+  margin: 26px 0 22px;
+}
+/* 卡片变宽后若仍是单行高，会显得像一条细长的带子；给它一点纵向体量才压得住场面 */
+.home.chat .composer {
+  padding: 26px 26px 16px;
+}
+.home.chat .composer textarea {
+  min-height: 72px;
 }
 
 /* ── Hero：工坊版式标题左对齐；chat 版式居中问候 ── */

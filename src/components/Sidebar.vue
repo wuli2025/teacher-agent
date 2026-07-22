@@ -139,8 +139,8 @@ const sortedConvs = computed<Conversation[]>(() => {
          右侧收起按钮。收起后整列 display:none,展开入口在主区左上角的浮动按钮(App.vue)。 -->
     <div class="sb-head">
       <span class="brand">
-        <span class="brand-tile"><img src="/mascot/mascot.png" alt="LUMI" /></span>
-        <span class="brand-word">LUMI</span>
+        <span class="brand-tile"><img src="/brand/logo.png" alt="微光" /></span>
+        <span class="brand-word">微光</span>
       </span>
       <button
         class="collapse-btn push-right"
@@ -346,28 +346,27 @@ const sortedConvs = computed<Conversation[]>(() => {
 }
 .brand-tile {
   /* Frame 16：26.35px 白底、radius 5.1，吉祥物按设计稿略大于容器(27.5px)溢出裁切 */
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
-  background: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   flex-shrink: 0;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04);
 }
 .brand-tile img {
-  width: 27px;
-  height: 27px;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  display: block;
 }
 .brand-word {
   /* 设计稿字标图 37×22,以文字复刻:Inter 600 */
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   font-weight: 600;
-  font-size: 15px;
-  letter-spacing: 0.4px;
+  font-size: 19px;
+  letter-spacing: 1px;
   color: #191919;
 }
 .collapse-btn.push-right {
