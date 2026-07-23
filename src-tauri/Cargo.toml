@@ -12,7 +12,7 @@ resolver = "2"
 
 [package]
 name = "polaris-teacher"
-version = "1.0.10"
+version = "1.0.11"
 description = "微光 - 本地优先 AI 教学工作台"
 authors = ["winner3388"]
 edition = "2021"
