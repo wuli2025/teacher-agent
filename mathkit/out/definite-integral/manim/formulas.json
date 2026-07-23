@@ -1,0 +1,164 @@
+[
+ {
+  "scene": "F001_int02biglx21bigrmathrmdx",
+  "latex": "\\int_{0}^{2}\\bigl|x^{2}-1\\bigr|\\mathrm{d}x=\\int_{0}^{1}\\left(1-x^{2}\\right)\\mathrm{d}x+\\int_{1}^{2}\\left(x^{2}-1\\right)\\mathrm{d}x",
+  "png": "f_0cf07d7b4ccb072a.png",
+  "px": "2168x288"
+ },
+ {
+  "scene": "F002_intbafintabf",
+  "latex": "\\int_{b}^{a} f=-\\int_{a}^{b} f",
+  "png": "f_1aa69fa125afeba9.png",
+  "px": "800x316"
+ },
+ {
+  "scene": "F003_int02x1mathrmdx",
+  "latex": "\\int_{0}^{2}(x-1)\\,\\mathrm{d}x",
+  "png": "f_1bfc40226ceaaeb3.png",
+  "px": "880x384"
+ },
+ {
+  "scene": "F004_AxintaxftmathrmdtLongrig",
+  "latex": "A(x)=\\int_{a}^{x} f(t)\\,\\mathrm{d}t\\ \\Longrightarrow\\ A'(x)=f(x)",
+  "png": "f_216fd3eef031ff95.png",
+  "px": "1980x320"
+ },
+ {
+  "scene": "F005_leftxfracx33right01leftf",
+  "latex": "=\\left[x-\\frac{x^{3}}{3}\\right]_{0}^{1}+\\left[\\frac{x^{3}}{3}-x\\right]_{1}^{2}=\\frac{2}{3}+\\left(\\frac{2}{3}+\\frac{2}{3}\\right)",
+  "png": "f_2a675c1f15fcf050.png",
+  "px": "1904x312"
+ },
+ {
+  "scene": "F006_int02biglx21bigrmathrmdx",
+  "latex": "\\int_{0}^{2}\\bigl|x^{2}-1\\bigr|\\mathrm{d}x=2",
+  "png": "f_45f11c1056ededa0.png",
+  "px": "844x288"
+ },
+ {
+  "scene": "F007_frac1n3cdotfracnn12n16fr",
+  "latex": "=\\frac{1}{n^{3}}\\cdot\\frac{n(n+1)(2n+1)}{6}=\\frac{1}{6}\\left(1+\\frac{1}{n}\\right)\\left(2+\\frac{1}{n}\\right)",
+  "png": "f_4a8803c584cf0c56.png",
+  "px": "2136x284"
+ },
+ {
+  "scene": "F008_WintabFxmathrmdx",
+  "latex": "W=\\int_{a}^{b} F(x)\\,\\mathrm{d}x",
+  "png": "f_4bc48077c4073973.png",
+  "px": "1024x364"
+ },
+ {
+  "scene": "F009_int02biglx21bigrmathrmdx",
+  "latex": "\\int_{0}^{2}\\bigl|x^{2}-1\\bigr|\\mathrm{d}x\\neq\\left[\\tfrac{x^{3}}{3}-x\\right]_{0}^{2}",
+  "png": "f_4e648d86fef67db4.png",
+  "px": "1248x300"
+ },
+ {
+  "scene": "F010_int01x2mathrmdxfrac13",
+  "latex": "\\int_{0}^{1}x^{2}\\,\\mathrm{d}x=\\frac{1}{3}",
+  "png": "f_4ee4350be94731ef.png",
+  "px": "668x288"
+ },
+ {
+  "scene": "F011_limntoinftysumi1n",
+  "latex": "\\lim_{n\\to\\infty}\\sum_{i=1}^{n}",
+  "png": "f_564d4f806324fa9f.png",
+  "px": "564x448"
+ },
+ {
+  "scene": "F012_intabfxmathrmdxlimntoinf",
+  "latex": "\\int_{a}^{b} f(x)\\,\\mathrm{d}x=\\lim_{n\\to\\infty}\\sum_{i=1}^{n}f(\\xi_i)\\cdot\\frac{b-a}{n}",
+  "png": "f_56532390e20520f1.png",
+  "px": "2268x476"
+ },
+ {
+  "scene": "F013_limntoinftySnfrac16cdot1",
+  "latex": "\\lim_{n\\to\\infty}S_n=\\frac{1}{6}\\cdot 1\\cdot 2=\\frac{1}{3}",
+  "png": "f_581df6a0368d4329.png",
+  "px": "1032x244"
+ },
+ {
+  "scene": "F014_sintt1t2vtmathrmdtqquade",
+  "latex": "s=\\int_{t_1}^{t_2} v(t)\\,\\mathrm{d}t,\\qquad \\ell=\\int_{t_1}^{t_2}\\bigl|v(t)\\bigr|\\,\\mathrm{d}t",
+  "png": "f_5caf1fb07d7692be.png",
+  "px": "1900x348"
+ },
+ {
+  "scene": "F015_Sint01x2mathrmdx",
+  "latex": "S=\\int_{0}^{1}x^{2}\\,\\mathrm{d}x=\\ ?",
+  "png": "f_63b49f4f542d4708.png",
+  "px": "1276x432"
+ },
+ {
+  "scene": "F016_Snsumi1nleftfracinright2",
+  "latex": "S_n=\\sum_{i=1}^{n}\\left(\\frac{i}{n}\\right)^{2}\\cdot\\frac{1}{n}=\\frac{1}{n^{3}}\\sum_{i=1}^{n} i^{2}",
+  "png": "f_74869a919037e243.png",
+  "px": "1396x332"
+ },
+ {
+  "scene": "F017_int01left3x22xrightmathr",
+  "latex": "\\int_{0}^{1}\\left(3x^{2}+2x\\right)\\mathrm{d}x",
+  "png": "f_84e9a589783ef821.png",
+  "px": "1048x360"
+ },
+ {
+  "scene": "F018_Deltaxfracban",
+  "latex": "\\Delta x=\\frac{b-a}{n}",
+  "png": "f_a7e419df41ed0de8.png",
+  "px": "796x328"
+ },
+ {
+  "scene": "F019_biglx21bigrbegincases1x2",
+  "latex": "\\bigl|x^{2}-1\\bigr|=\\begin{cases}1-x^{2}, & 0\\le x\\le 1\\\\[2pt]x^{2}-1, & 1<x\\le 2\\end{cases}",
+  "png": "f_b0356408d110ce65.png",
+  "px": "1436x348"
+ },
+ {
+  "scene": "F020_intabfxmathrmdxFbFabiglF",
+  "latex": "\\int_{a}^{b} f(x)\\,\\mathrm{d}x=F(b)-F(a)=\\bigl[F(x)\\bigr]_{a}^{b},\\quad F'(x)=f(x)",
+  "png": "f_b99dcd9c20eb52ef.png",
+  "px": "3132x380"
+ },
+ {
+  "scene": "F021_F1xxfracx33qquadF2xfracx",
+  "latex": "F_1(x)=x-\\frac{x^{3}}{3},\\qquad F_2(x)=\\frac{x^{3}}{3}-x",
+  "png": "f_bbaf452019dc40b0.png",
+  "px": "1640x260"
+ },
+ {
+  "scene": "F022_Deltaxfrac1nqquadxiifrac",
+  "latex": "\\Delta x=\\frac{1}{n},\\qquad \\xi_i=\\frac{i}{n}\\quad(i=1,2,\\dots,n)",
+  "png": "f_bd8bc6b37ea660c3.png",
+  "px": "1712x244"
+ },
+ {
+  "scene": "F023_fxiiDeltax",
+  "latex": "f(\\xi_i)\\,\\Delta x",
+  "png": "f_c8e2e349e4e08afe.png",
+  "px": "596x232"
+ },
+ {
+  "scene": "F024_textstylelimntoinftysumi",
+  "latex": "\\textstyle\\lim_{n\\to\\infty}\\sum_{i=1}^{n}",
+  "png": "f_d8087bc1f9cc64b6.png",
+  "px": "812x216"
+ },
+ {
+  "scene": "F025_vtt24t30letle3",
+  "latex": "v(t)=t^{2}-4t+3\\ (0\\le t\\le 3)",
+  "png": "f_ea9d82b4ecd3e43a.png",
+  "px": "1564x204"
+ },
+ {
+  "scene": "F026_Stexttexttimestext",
+  "latex": "S_{\\text{矩形}}=\\text{底}\\times\\text{高}",
+  "png": "f_fb8dff940b8c29b4.png",
+  "px": "932x216"
+ },
+ {
+  "scene": "F027_Sintabbiglfxbigrmathrmdx",
+  "latex": "S=\\int_{a}^{b}\\bigl|f(x)\\bigr|\\,\\mathrm{d}x",
+  "png": "f_fd8fedb1081e0b49.png",
+  "px": "872x316"
+ }
+]

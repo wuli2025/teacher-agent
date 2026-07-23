@@ -122,6 +122,43 @@ def hole_diagram(slide, x, y, w, h, hole_t=0.5):
     return (hx, hy)
 
 
+# ────────────────────────── 图 3：曲边梯形的矩形逼近 ──────────────────────────
+def riemann_diagram(slide, x, y, w, h, n=9, f=None):
+    """曲边梯形 + 内接矩形条：定积分「分割—近似—求和—取极限」的直观图。
+    f 为 [0,1]→[0,1] 的归一化函数，默认 y = x²。"""
+    if f is None:
+        f = lambda t: t * t
+    _frame(slide, x, y, w, h)
+    pad = 0.30
+    ox, oy = x + pad + 0.18, y + h - pad - 0.10
+    ax_w, ax_h = w - 2 * pad - 0.28, h - 2 * pad - 0.05
+    _arrow(slide, ox - 0.12, oy, ox + ax_w, oy)
+    _arrow(slide, ox, oy + 0.12, ox, oy - ax_h)
+
+    x0, x1 = ox + 0.06 * ax_w, ox + 0.86 * ax_w
+    span = x1 - x0
+    top = 0.86 * ax_h                       # f=1 对应的高度
+
+    # 先画矩形条（在曲线下层），高度取每段右端点函数值 → 上和，肉眼可见「逼近」
+    bw = span / n
+    for i in range(n):
+        t = (i + 1) / n
+        bh = f(t) * top
+        if bh < 0.02:
+            continue
+        r = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x0 + i * bw),
+                                   Inches(oy - bh), Inches(bw), Inches(bh))
+        r.fill.solid(); r.fill.fore_color.rgb = BG2
+        r.line.color.rgb = CYAN; r.line.width = Pt(0.9)
+        r.shadow.inherit = False
+        r.name = "dia_bar"
+
+    pts = [(x0 + span * (i / 48), oy - f(i / 48) * top) for i in range(49)]
+    _freeform(slide, pts, CORAL, 3.0)
+    _dash(slide, x1, oy, x1, oy - f(1.0) * top)
+    return (x0, x1, oy)
+
+
 # ────────────────────────── 图 2：夹逼定理 ──────────────────────────
 def squeeze_diagram(slide, x, y, w, h):
     """上下两条曲线向右收拢，把中间的曲线夹向同一个极限值。"""
