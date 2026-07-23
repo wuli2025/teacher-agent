@@ -84,6 +84,24 @@ Invoke-RestMethod "https://github.com/wuli2025/teacher-agent/releases/latest/dow
 > 请求；验安装包内容时别只看状态码——查首字节魔数（exe = `4d 5a`，tar.gz = `1f 8b`）+ 字节数
 > 与本地一致，才能确认是真包而非某个回退页。
 
+### ⚠ 自托管单文件 300 MiB 天花板（v1.0.11 踩到）
+
+`wrangler r2 object put` 是单次 PUT，**硬上限 300 MiB**（超了直接报
+`Wrangler only supports uploading files up to 300 MiB in size`）。v1.0.11 起 mac 的
+`TeacherAgent.app.tar.gz` 与 `.dmg` 双双涨到 307 MiB，publish job 在第一个文件就红，
+**连带 Windows 包和 latest.json 也没传上去** —— 自托管源整体停在上一版。
+
+现在 CI 与 `scripts/publish-r2.ps1` 都改成：
+
+- 超 300 MiB 的**跳过并删掉桶里的同名旧对象**。mac 更新包文件名不带版本号，
+  留着旧的会让客户端白下几百 MB 再验签失败；删掉则 404 快速回落 `gh-proxy → ghfast → github`。
+- **Windows 装包超限则直接红** —— 它是自托管的主路径，没上去这条源就没意义。
+- 端点回验按同一条线跳过超限文件，只报 notice。
+
+所以当前状态是：**Windows 走自托管，mac 走 GitHub 镜像**。要让 mac 也回到自托管，
+得换 S3 多段上传（R2 的 S3 API + Access Key/Secret，wrangler 的 OAuth 身份用不了），
+或者把 mac 包体积压回 300 MiB 以内。
+
 ## 4. 自托管没同步上怎么办
 
 CI 里上传 R2 那步需要仓库 Secrets `CLOUDFLARE_API_TOKEN`（R2 → Object Read & Write）与

@@ -42,12 +42,29 @@ if (-not (Test-Path $latestPath)) { throw "Release $Tag 里没有 latest.json，
 $got = (Get-Content $latestPath -Raw | ConvertFrom-Json).version
 if ($got -ne $version) { throw "latest.json 里的版本是 $got，与 $Tag 对不上" }
 
-# latest.json 最后传：装包先就位，避免「latest.json 已指新版、包还没上去」的空窗期。
-$assets = Get-ChildItem $dir -File | Where-Object { $_.Name -ne "latest.json" }
-foreach ($f in $assets) {
-  "   → {0,-40} {1,7:N1} MB" -f $f.Name, ($f.Length / 1MB) | Write-Host
+# wrangler r2 object put 是单次 PUT，硬上限 300 MiB。v1.0.11 起 mac 的 .app.tar.gz /
+# .dmg 都涨过了这条线：不跳过的话第一个文件就抛异常，Windows 包与 latest.json 一起传不上去。
+# 跳过的同时要删掉桶里的同名旧对象 —— mac 更新包文件名不带版本号，留着旧的会让客户端
+# 白下几百 MB 再验签失败；删掉则 404 快速回落 gh-proxy/github。
+$LIMIT = 300MB
+$all = Get-ChildItem $dir -File | Where-Object { $_.Name -ne "latest.json" }
+$assets = @()
+$skipped = @()
+foreach ($f in $all) {
+  if ($f.Length -gt $LIMIT) {
+    "   ⏭ 跳过 {0,-40} {1,7:N1} MB（> 300 MiB 上限，该平台走 github 镜像）" -f $f.Name, ($f.Length / 1MB) | Write-Host
+    $skipped += $f.Name
+    npx --yes wrangler@4 r2 object delete "$Bucket/downloads/$($f.Name)" --remote 2>&1 | Out-Null
+    continue
+  }
+  "   → 上传 {0,-40} {1,7:N1} MB" -f $f.Name, ($f.Length / 1MB) | Write-Host
   npx --yes wrangler@4 r2 object put "$Bucket/downloads/$($f.Name)" --file $f.FullName --remote
   if ($LASTEXITCODE -ne 0) { throw "上传失败：$($f.Name)" }
+  $assets += $f
+}
+# Windows 装包是自托管的主路径，它没上去等于这条源没意义。
+if ($skipped | Where-Object { $_ -match 'x64-setup\.exe$' }) {
+  throw "Windows 装包超过 300 MiB，自托管主路径断了：需改用 S3 多段上传或压缩体积"
 }
 npx --yes wrangler@4 r2 object put "$Bucket/downloads/latest.json" `
   --file $latestPath --content-type application/json --remote
@@ -64,6 +81,7 @@ foreach ($i in 1..5) {
         if ($code -ne 200) { throw "自托管缺包：$code $($f.Name)" }
         Write-Host "   ✓ 200 $($f.Name)"
       }
+      if ($skipped) { Write-Host "  ⏭ 未上自托管（超 300 MiB，走 github 镜像）：$($skipped -join ', ')" }
       Write-Host "✓ 自托管源已是 $version，装包齐全"
       exit 0
     }

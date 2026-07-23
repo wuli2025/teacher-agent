@@ -277,14 +277,35 @@ jobs:
             echo "::error::未配 CLOUDFLARE_API_TOKEN/ACCOUNT_ID。private 仓下自托管是唯一活源,不能跳过。补发见 scripts/publish-r2.ps1"
             exit 1
           fi
+          # wrangler r2 object put 的硬上限是 300 MiB(单次 PUT,不走分片)。
+          # v1.0.11 起 mac 的 .app.tar.gz / .dmg 都涨过了 300 MiB,整步会在第一个文件就红,
+          # 连带 Windows 包和 latest.json 一起传不上去 —— 那才是真正的事故。
+          # 所以:超限文件跳过 + 删掉桶里的同名旧对象(否则 mac 客户端会白下几百 MB 旧包再验签失败,
+          # 删掉则 404 快速回落 gh-proxy/github),Windows 包与 latest.json 必须成功。
+          LIMIT=$((300 * 1024 * 1024))
+          skipped=""
           # latest.json 最后传:装包先就位,避免「latest.json 已指新版、包还没上去」的空窗期。
           for f in $(ls dist | grep -v '^latest.json$'); do
-            echo "→ $f"
+            size=$(stat -c%s "dist/$f")
+            if [ "$size" -gt "$LIMIT" ]; then
+              echo "::warning::$f 为 $((size/1024/1024)) MiB,超过 wrangler 300 MiB 上限,跳过自托管;该平台走 gh-proxy/github 镜像"
+              skipped="$skipped $f"
+              npx --yes wrangler@4 r2 object delete "teacher-agent-dist/downloads/$f" --remote || true
+              continue
+            fi
+            echo "→ $f ($((size/1024/1024)) MiB)"
             npx --yes wrangler@4 r2 object put "teacher-agent-dist/downloads/$f" \
               --file "dist/$f" --remote
           done
+          # Windows 装包是自托管的主路径,它没上去等于自托管没意义,必须红。
+          win=$(ls dist | grep -E 'x64-setup\.exe$' || true)
+          if [ -n "$win" ] && echo "$skipped" | grep -q "$win"; then
+            echo "::error::Windows 装包 $win 超过 300 MiB,自托管主路径断了。需改用 S3 多段上传或压缩体积。"
+            exit 1
+          fi
           npx --yes wrangler@4 r2 object put "teacher-agent-dist/downloads/latest.json" \
             --file dist/latest.json --content-type application/json --remote
+          [ -n "$skipped" ] && echo "::notice::自托管未覆盖(超 300 MiB):$skipped" || true
 
       # 自托管是 private 仓下唯一的活源,必须实测拿到的是 JSON 且版本号对得上,而不是只看 HTTP 200。
       # 两个域都验:自定义域给 v1.0.3+,r2.dev 给 v1.0.2 及更早那批写死它的老客户端。同一个桶。
@@ -307,7 +328,12 @@ jobs:
             done
             [ "$ok" = "1" ] || { echo "::error::$BASE 的 latest.json 未同步到 $VERSION"; fail=1; continue; }
             # 装包也得真在:客户端就是从这里拉包,404 会白耗一次重试。
+            # 超 300 MiB 的那些上一步就没传(wrangler 上限),这里按同一条线跳过,只报 notice。
             for f in $(ls dist | grep -v '^latest.json$'); do
+              if [ "$(stat -c%s "dist/$f")" -gt $((300 * 1024 * 1024)) ]; then
+                echo "::notice::$f 超 300 MiB 未上自托管,该平台走 gh-proxy/github 镜像"
+                continue
+              fi
               code=$(curl -sI -o /dev/null -w '%{http_code}' "$BASE/$f" || echo 000)
               [ "$code" = "200" ] && echo "  ✓ $code $f" || { echo "::error::自托管缺包: $code $BASE/$f"; fail=1; }
             done
