@@ -25,6 +25,10 @@ def die(msg, code=1):
 def main():
     args = [a for a in sys.argv[1:]]
     ratio = "1:1"
+    optimize = True
+    if "--no-opt" in args:          # 教学示意图要按字面画,不能让服务端改写提示词
+        optimize = False
+        args.remove("--no-opt")
     if "--ratio" in args:
         i = args.index("--ratio")
         try:
@@ -44,7 +48,7 @@ def main():
         "n": 1,
         "response_format": "url",
         "aspect_ratio": ratio,
-        "prompt_optimizer": True,
+        "prompt_optimizer": optimize,
     }).encode()
 
     url = None

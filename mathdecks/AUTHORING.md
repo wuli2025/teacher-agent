@@ -1,5 +1,9 @@
 # 高中数学动画课件 · spec 编写契约（权威）
 
+> ⚠️ 分流：本链路（spec JSON → Rust `pptx_native`）适合**矢量动画图多、公式简单**的课。
+> **公式密集的课（积分/矩阵/分段函数/量词链/多步推导）走 `mathkit/texkit/CONTRACT.md`** ——
+> 那条链路用 KaTeX 渲染公式并带溢出体检与 PowerPoint 实渲验收，不会出现公式排不出或排乱。
+
 产出：一个 `polaris.slides.json`（顶层 `{"theme":..,"slides":[..]}`），由 Rust 原生引擎
 `pptx_native.rs` 确定性渲染成**原生可编辑 .pptx**。你只出 spec，不画像素。
 

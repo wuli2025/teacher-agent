@@ -97,6 +97,9 @@ const DECKS: Record<string, { fileName: string; pages: number }> = {
   senior_math_space_vector: { fileName: "空间向量与立体几何_课件.pptx", pages: 12 },
   senior_math_matrix: { fileName: "线性方程组与矩阵_课件.pptx", pages: 12 },
   senior_math_limit: { fileName: "函数的极限与连续_课件.pptx", pages: 12 },
+  // 公式精排版专线（mathkit/texkit）：公式走 KaTeX 渲染成高清 PNG，例题铺成逐步累积页。
+  senior_math_epsilon_delta: { fileName: "函数的极限与连续性.pptx", pages: 21 },
+  senior_math_stepwise: { fileName: "高中数学解题步骤演示.pptx", pages: 18 },
 };
 
 /** 给范例挂上原课件真源。deckId 缺省时：范例 id 本身是 deck，否则封面名即 deck（数学/教案范例复用课件封面）。 */
@@ -144,6 +147,9 @@ const PPT_SAMPLES: TeachSample[] = withDecks([
 // ─────────── 生成数学课件（难度更高）：高中 10 套核心概念课（真课件）+ 初小 4 套 ───────────
 // 高中 10 套无 cover 名：卡片封面直接用课件第 1 页缩略图（真版式即封面）。
 const MATH_SAMPLES: TeachSample[] = withDecks([
+  // 置顶两套「公式精排版」样板：每条公式都是 LaTeX 渲染的高清图，例题按步累积翻页讲。
+  { id: "senior_math_epsilon_delta", title: "函数的极限与连续性", subtitle: "ε-δ 定义 · 分段函数 · 逐步证明", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《函数的极限与连续性》课件，用 ε-δ 定义讲清极限，例题按解题步骤逐页累积展开，公式要严谨排版（量词链、分段函数、分式都不能排错）。" },
+  { id: "senior_math_stepwise", title: "解题步骤演示", subtitle: "错位相减 · 二面角 · 高斯消元", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《解题步骤演示》课件，选三道综合题（数列错位相减、空间向量求二面角、增广矩阵行变换），每题连续多页：题目区固定，解题过程逐页累积一行，当前步高亮。" },
   { id: "senior_math_derivative", title: "导数的概念与几何意义", subtitle: "瞬时变化率 · 切线斜率", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《导数的概念与几何意义》课件，从平均变化率到瞬时变化率，用切线读懂局部变化，含完整推导与典型例题。" },
   { id: "senior_math_limit", title: "函数的极限与连续", subtitle: "极限思想 · 连续性", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《函数的极限与连续》课件，含极限的直观理解、严谨表述、连续性判定与典型例题。" },
   { id: "senior_math_integral", title: "定积分与微积分基本定理", subtitle: "曲边梯形 · 牛顿-莱布尼茨", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《定积分与微积分基本定理》课件，从曲边梯形面积引入，含定积分定义、基本定理推导与计算例题。" },

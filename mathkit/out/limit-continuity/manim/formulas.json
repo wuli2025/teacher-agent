@@ -1,0 +1,170 @@
+[
+ {
+  "scene": "F001_limxto0fracxx1neq1",
+  "latex": "\\lim_{x\\to0^{-}}\\frac{|x|}{x}=-1\\neq 1",
+  "png": "f_0707bd52472bb080.png",
+  "px": "936x284"
+ },
+ {
+  "scene": "F002_0xadelta",
+  "latex": "0<|x-a|<\\delta",
+  "png": "f_0c3e5df0b168878d.png",
+  "px": "1044x244"
+ },
+ {
+  "scene": "F003_existsdelta0",
+  "latex": "\\exists\\,\\delta>0",
+  "png": "f_1130b48deb2f3733.png",
+  "px": "540x244"
+ },
+ {
+  "scene": "F004_fxbegincasesdfracx21x1xn",
+  "latex": "f(x)=\\begin{cases}\\dfrac{x^{2}-1}{x-1}, & x\\neq 1\\\\[4pt] a, & x=1\\end{cases}",
+  "png": "f_1573f326cac9aa17.png",
+  "px": "1152x416"
+ },
+ {
+  "scene": "F005_limxto1fracx21x12",
+  "latex": "\\lim_{x\\to1}\\frac{x^{2}-1}{x-1}=2",
+  "png": "f_1b1de6d15b29bf8a.png",
+  "px": "776x292"
+ },
+ {
+  "scene": "F006_limxtoafxL",
+  "latex": "\\lim_{x\\to a}f(x)=L",
+  "png": "f_2a5a1699efa2f79d.png",
+  "px": "1184x364"
+ },
+ {
+  "scene": "F007_fxLbigl3x15bigr3x63x2",
+  "latex": "|f(x)-L|=\\bigl|(3x-1)-5\\bigr|=|3x-6|=3|x-2|",
+  "png": "f_303f2fc2c2811236.png",
+  "px": "2136x176"
+ },
+ {
+  "scene": "F008_limxto1x12limxto1x1",
+  "latex": "\\lim_{x\\to1^{-}}(x+1)=2=\\lim_{x\\to1^{+}}(x+1)",
+  "png": "f_33cd98ec93daa103.png",
+  "px": "1364x212"
+ },
+ {
+  "scene": "F009_forallvarepsilon0",
+  "latex": "\\forall\\,\\varepsilon>0",
+  "png": "f_33eec9930630bc68.png",
+  "px": "536x244"
+ },
+ {
+  "scene": "F010_3x2varepsiloniffx2fracva",
+  "latex": "3|x-2|<\\varepsilon\\iff|x-2|<\\frac{\\varepsilon}{3}",
+  "png": "f_341b16a3b55062a5.png",
+  "px": "1360x224"
+ },
+ {
+  "scene": "F011_limxto34x57",
+  "latex": "\\lim_{x\\to 3}(4x-5)=7",
+  "png": "f_3edf4150d38eb540.png",
+  "px": "960x256"
+ },
+ {
+  "scene": "F012_limxtoafxLifflimxtoafxli",
+  "latex": "\\lim_{x\\to a}f(x)=L\\iff\\lim_{x\\to a^{-}}f(x)=\\lim_{x\\to a^{+}}f(x)=L",
+  "png": "f_4016f9c46c0f70ac.png",
+  "px": "2612x260"
+ },
+ {
+  "scene": "F013_limxto2fracx24x2",
+  "latex": "\\lim_{x\\to 2}\\frac{x^{2}-4}{x-2}",
+  "png": "f_422e234ea5d8244e.png",
+  "px": "716x356"
+ },
+ {
+  "scene": "F014_limxtoafxLiffforallvarep",
+  "latex": "\\lim_{x\\to a}f(x)=L\\iff\\forall\\,\\varepsilon>0,\\ \\exists\\,\\delta>0,\\ \\text{使}\\ 0<|x-a|<\\delta\\Rightarrow|f(x)-L|<\\varepsilon",
+  "png": "f_572185a305982ecf.png",
+  "px": "4068x256"
+ },
+ {
+  "scene": "F015_ftextx1textifflimxto1fxf",
+  "latex": "f\\ \\text{在}\\ x=1\\ \\text{连续}\\iff\\lim_{x\\to1}f(x)=f(1)=a",
+  "png": "f_670d62a5961c7b55.png",
+  "px": "1876x208"
+ },
+ {
+  "scene": "F016_a2",
+  "latex": "a=2",
+  "png": "f_74ea6ea3e79cb664.png",
+  "px": "328x176"
+ },
+ {
+  "scene": "F017_xto1textfxto",
+  "latex": "x\\to 1\\ \\text{时}\\ f(x)\\to\\ ?",
+  "png": "f_768667ff5bad85c4.png",
+  "px": "1272x244"
+ },
+ {
+  "scene": "F018_textdeltafracvarepsilon3",
+  "latex": "\\text{取}\\ \\delta=\\frac{\\varepsilon}{3}>0",
+  "png": "f_7ca6f2a881b46f1f.png",
+  "px": "644x224"
+ },
+ {
+  "scene": "F019_limxto0fracsinxx1",
+  "latex": "\\lim_{x\\to 0}\\frac{\\sin x}{x}=1",
+  "png": "f_857b221ab840ed41.png",
+  "px": "1028x388"
+ },
+ {
+  "scene": "F020_forallvarepsilon0existsd",
+  "latex": "\\forall\\,\\varepsilon>0,\\ \\exists\\,\\delta=\\tfrac{\\varepsilon}{3}>0,\\ 0<|x-2|<\\delta\\Rightarrow|(3x-1)-5|<\\varepsilon",
+  "png": "f_86ce00b4ac09974e.png",
+  "px": "2524x176"
+ },
+ {
+  "scene": "F021_deltafracvarepsilon3text",
+  "latex": "\\delta=\\frac{\\varepsilon}{3}\\ \\text{或}\\ \\frac{\\varepsilon}{4}",
+  "png": "f_998536b4eacb957c.png",
+  "px": "608x240"
+ },
+ {
+  "scene": "F022_limxto1fracx21x1limxto1f",
+  "latex": "\\lim_{x\\to1}\\frac{x^{2}-1}{x-1}=\\lim_{x\\to1}\\frac{(x+1)(x-1)}{x-1}=\\lim_{x\\to1}(x+1)=2",
+  "png": "f_9d40d19e9ea60b06.png",
+  "px": "2188x268"
+ },
+ {
+  "scene": "F023_limntoinftyleft1frac1nri",
+  "latex": "\\lim_{n\\to\\infty}\\left(1+\\frac{1}{n}\\right)^{\\!n}=e",
+  "png": "f_a2f1988f6c155057.png",
+  "px": "1284x408"
+ },
+ {
+  "scene": "F024_0x2deltaRightarrowfx53x2",
+  "latex": "0<|x-2|<\\delta\\Rightarrow|f(x)-5|=3|x-2|<3\\delta=\\varepsilon",
+  "png": "f_d6fdb1fa4866773d.png",
+  "px": "2140x176"
+ },
+ {
+  "scene": "F025_fxfracx21x1quadxneq1",
+  "latex": "f(x)=\\frac{x^{2}-1}{x-1}\\quad(x\\neq 1)",
+  "png": "f_dbfba272cc94e843.png",
+  "px": "1808x420"
+ },
+ {
+  "scene": "F026_fxbegincasesdfracsqrtx11",
+  "latex": "f(x)=\\begin{cases}\\dfrac{\\sqrt{x+1}-1}{x}, & x>0\\\\[4pt] a x+2, & x\\le 0\\end{cases}",
+  "png": "f_e80eac559249f8ed.png",
+  "px": "1616x492"
+ },
+ {
+  "scene": "F027_ftextxatextifflimxtoafxf",
+  "latex": "f\\ \\text{在}\\ x=a\\ \\text{处连续}\\iff\\lim_{x\\to a}f(x)=f(a)",
+  "png": "f_ea15aa077301b3c5.png",
+  "px": "2396x260"
+ },
+ {
+  "scene": "F028_gxlefxlehxtextlimxtoagxl",
+  "latex": "g(x)\\le f(x)\\le h(x)\\ \\text{且}\\ \\lim_{x\\to a}g(x)=\\lim_{x\\to a}h(x)=L\\ \\Rightarrow\\ \\lim_{x\\to a}f(x)=L",
+  "png": "f_fd26e0b74bfd7912.png",
+  "px": "3096x224"
+ }
+]

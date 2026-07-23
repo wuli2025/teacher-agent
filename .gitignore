@@ -85,3 +85,12 @@ llmwiki/Polaris/
 
 # wrangler 的本地模拟存储(r2 object put 不加 --remote 时写这里,别当成真上传了)
 .wrangler/
+
+# mathkit 的可重生中间产物:公式 PNG 缓存、逐页实渲图、联系表。
+# 跑一遍 decks/*.py + render_pptx.ps1 就能重出,没必要几十 MB 进库;
+# 最终 pptx、报告、Manim 源码、情境图仍然入库。
+mathkit/out/*/tex/
+mathkit/out/*/preview/
+mathkit/out/*/sheets/
+mathkit/texkit/out/
+**/__pycache__/
