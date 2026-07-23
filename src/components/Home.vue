@@ -494,14 +494,17 @@ const filteredSamples = computed(() => {
 
 // 封面：有 cover 名则优先真图 .png（codex 生成）缺则回退 .svg；无 cover 名用课件第 1 页截图
 function coverSrc(s: TeachSample) {
-  // 教案封面本就是矢量图(脚本按学科主色生成的 svg),直接给 .svg —— 别走 png 再 404 回退
-  if (s.docId) return `/sample-covers/${s.cover || s.docId}.svg`;
+  // 教案封面已换成文生图的学科插画(scripts/gen-lesson-covers.py 出的 .png):
+  // 旧的 svg 封面是「假纸张 + 又印一遍标题 + 右下角漏出 docId」,15 张几乎一样,整面墙一片白。
+  // svg 仍留在库里当回退,新图缺失时不至于开天窗。
+  if (s.docId) return `/sample-covers/${s.cover || s.docId}.png`;
   if (s.cover) return `/sample-covers/${s.cover}.png`;
   return s.deckId ? thumbSrc(s.deckId, 1) : "";
 }
 function onCoverErr(e: Event, s: TeachSample) {
   const img = e.target as HTMLImageElement;
-  if (s.cover && !img.src.endsWith(".svg")) img.src = `/sample-covers/${s.cover}.svg`;
+  const name = s.cover || s.docId;
+  if (name && !img.src.endsWith(".svg")) img.src = `/sample-covers/${name}.svg`;
 }
 </script>
 

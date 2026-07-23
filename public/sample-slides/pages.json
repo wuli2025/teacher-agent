@@ -39,5 +39,6 @@
  "senior_math_matrix": 12,
  "senior_math_limit": 12,
  "senior_math_epsilon_delta": 21,
- "senior_math_stepwise": 18
+ "senior_math_stepwise": 18,
+ "senior_math_integral_nl": 22
 }
