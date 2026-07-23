@@ -11,6 +11,7 @@ import {
 import { useAppStore } from "./app";
 import { useArtifactsStore } from "./artifacts";
 import { useSessionsStore } from "../features/coworker/stores/sessions";
+import { maybeAskDeckFollowUp } from "../lib/lessonFollowUp";
 
 export interface Bubble {
   role: "user" | "assistant" | "tool";
@@ -483,6 +484,8 @@ export const useChatStore = defineStore("chatRuntime", () => {
         // 后端在本轮收尾时可能给这条对话自动改了名(产物名 / LLM 归纳的主题名),
         // 拉一次列表把新标题同步进侧栏。失败无所谓,下次刷新自然会拿到。
         void app.refreshAllConversations();
+        // 教案工坊的一轮生成落定:登记过且教案真落盘 → 弹「生成配套课件」追问
+        maybeAskDeckFollowUp(cid, arr.flatMap((b) => b.artifacts ?? []));
         // 本轮结束 → 该对话不再受「发送中」保护,顺手做一次 LRU 卸载(封顶常驻气泡)。
         evictStaleConversations();
       }

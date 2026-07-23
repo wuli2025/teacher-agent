@@ -27,5 +27,15 @@
   "fanben_xiaoshuo": 14,
   "fanben_chun": 19,
   "fanben_solar": 19,
-  "fanben_seasons": 19
+  "fanben_seasons": 19,
+  "senior_math_derivative": 12,
+  "senior_math_integral": 12,
+  "senior_math_ellipse": 12,
+  "senior_math_induction": 12,
+  "senior_math_bayes": 16,
+  "senior_math_trig_graph": 12,
+  "senior_math_complex": 12,
+  "senior_math_space_vector": 12,
+  "senior_math_matrix": 12,
+  "senior_math_limit": 12
 }

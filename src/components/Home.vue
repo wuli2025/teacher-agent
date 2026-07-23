@@ -11,6 +11,7 @@ import { useFileDrop } from "../composables/useFileDrop";
 import { WebVoiceRecorder } from "../lib/webVoice";
 import { humanizeError } from "../lib/humanizeError";
 import { MODES, GRADES, subjectOf, subjectsOf, type Grade, type TeachMode, type TeachSample } from "../lib/teachSamples";
+import { registerLessonJob } from "../lib/lessonFollowUp";
 import { toast } from "../composables/useToast";
 
 // KeepAlive 友好命名（虽然 Home 很轻，保持一致）
@@ -27,20 +28,9 @@ const isChat = computed(() => app.homeMode === "chat");
 // 设计稿里三个工坊共用同一句欢迎语「LUMI 你的智能助手」，
 // 工坊差异只体现在导航高亮、输入占位与范例库上，标题不再随模式变。
 
-// 欢迎语下方的快捷建议 chip（文案取自设计稿）。
-// 点一下：切到对应工坊 + 预填提示词，用户可直接回车生成。
-const QUICK: { text: string; mode?: TeachMode; prompt?: string }[] = [
-  { text: "分析这份报告主要内容", prompt: "分析这份报告的主要内容，提炼要点与结论。" },
-  { text: "写一份PPT", mode: "ppt" },
-  { text: "帮我写一份教案", mode: "lesson" },
-  { text: "生成数学课件", mode: "math" },
-];
-function useQuick(q: (typeof QUICK)[number]) {
-  if (q.mode) app.setHomeMode(q.mode);
-  input.value = q.prompt ?? "";
-  autoGrow();
-  inputEl.value?.focus();
-}
+// 欢迎语与输入卡之间原来还有一排快捷建议 chip（分析报告 / 写PPT / 写教案 / 数学课件），
+// 设计稿里标题下面直接就是输入卡，故整排移除；对应的 QUICK 常量与 useQuick() 一并删掉。
+// 那几个入口在左侧导航里都有（AI 教案 / AI 课件PPT / 生成数学课件），功能没有丢。
 
 // 吉祥物图缺失时（打包漏带 / 文件被删）回退到原来的渐变圆球，hero 不塌成空洞
 const mascotOk = ref(true);
@@ -261,6 +251,10 @@ async function generate() {
       }
     }
     const display = `${m.badge}：${(userText || uploads.value[0]?.name || "未命名").slice(0, 24)}`;
+    // 教案工坊:登记这条对话,生成结束(done)时弹「是否生成配套 PPT」追问
+    if (m.key === "lesson") {
+      registerLessonJob(conv.id, userText || uploads.value[0]?.name.replace(/\.[a-z0-9]+$/i, "") || "");
+    }
     await chat.send(conv.id, m.buildPrompt(userText), display, undefined, {
       permissionMode: "auto_current",
       skillIds: m.skillIds,
@@ -519,16 +513,10 @@ function onCoverErr(e: Event, s: TeachSample) {
         <h1 class="hero-title">LUMI 你的智能助手</h1>
       </div>
 
-      <!-- 快捷建议 chip：设计稿里位于欢迎语下方、输入框上方 -->
-      <div class="quick-chips" :class="{ center: isChat }">
-        <button v-for="q in QUICK" :key="q.text" class="qc" @click="useQuick(q)">
-          {{ q.text }}
-        </button>
-      </div>
-
       <!-- 输入卡 + 覆在右上角外沿探头的吉祥物（设计稿：LUMI 猫形机器人从输入框上沿探出，chat/工坊两版式共用） -->
       <div class="composer-wrap">
-        <img class="composer-mascot" src="/mascot/mascot.png" alt="" @error="mascotOk = false" v-show="mascotOk" />
+        <!-- ?v=2：旧版 mascot.png 是白底图，同名换透明版后 WebView2 可能继续吐缓存的白底旧图，换 URL 强制取新 -->
+        <img class="composer-mascot" src="/mascot/mascot.png?v=2" alt="" @error="mascotOk = false" v-show="mascotOk" />
       <!-- 干净输入框（附件 / 图片 / 话筒 / 发送） -->
       <div class="composer" :class="{ busy }">
         <div class="composer-top">
@@ -803,13 +791,13 @@ function onCoverErr(e: Event, s: TeachSample) {
      视口高度约 2/3 处 —— 不贴底，也不飘在上半部。 */
   padding: min(18vh, 220px) 36px 24px;
 }
-/* 这一组内部的节奏：标题 → chip → 输入卡，间距收紧成一个整体 */
+/* 这一组内部的节奏：标题 → 输入卡，间距收紧成一个整体 */
 .home.chat .hero-title {
   font-size: 34px;
   line-height: 48px;
 }
-.home.chat .quick-chips {
-  margin: 26px 0 22px;
+.home.chat .composer-wrap {
+  margin-top: 22px;
 }
 /* 卡片变宽后若仍是单行高，会显得像一条细长的带子；给它一点纵向体量才压得住场面 */
 .home.chat .composer {
@@ -828,17 +816,27 @@ function onCoverErr(e: Event, s: TeachSample) {
   text-align: center;
 }
 /* ── 输入卡包裹 + 从右上角外沿探头的吉祥物（LUMI 猫形机器人）──
-   吉祥物落在输入卡之下（z-index:0），白色底座被卡片盖住，只露出探头。
-   图片白底≈#fafafa，四周与页面自然融合。 */
+   吉祥物落在输入卡之下（z-index:0），爪子被卡片盖住，只露出探头。
+   PNG 已是透明底（原图自带的白底 + 白卡片都抠掉了），所以护眼 / 深色主题下
+   不会再露出生硬的白矩形；换图时务必也保持透明底。 */
 .composer-wrap {
   position: relative;
+  /* 原先这段间距由 chip 行的 margin 撑着，chip 移除后由输入卡自己接管 */
+  margin-top: 26px;
 }
 .composer-mascot {
   position: absolute;
   right: 24px;
-  bottom: calc(100% - 26px);
-  width: 118px;
-  height: 118px;
+  /* 设计稿：爪子搭在输入卡上沿、下半身被卡片盖住，只露出探头。下探 12px 交给 z-index
+     更高的 .composer 盖住即可 —— 前提是卡片有那圈**实心**渐变描边（见 .composer）：
+     描边跟卡片一起画在猫之上，卡沿那条线才会完整地从猫身上横穿过去而不断开。
+     早先卡片只有一层 ~20% 不透明度的辉光当轮廓，压到猫的白身体上就没了，线在猫这里断一截，
+     看着像「边框被猫啃掉一块」——那是描边的问题，不是位置的问题，别再靠抬高吉祥物来绕。 */
+  bottom: calc(100% - 12px);
+  /* 图已抠成透明底（512×392，白卡片连同白底一起去掉），这里必须按原比例给高，
+     否则 contain 会在框里留空。 */
+  width: 128px;
+  height: 98px;
   object-fit: contain;
   object-position: center bottom;
   z-index: 0;
@@ -854,40 +852,19 @@ function onCoverErr(e: Event, s: TeachSample) {
   color: var(--text);
 }
 
-/* ── 快捷建议 chip（欢迎语下方一行） ── */
-.quick-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-  margin: 22px 0 26px;
-}
-.quick-chips.center {
-  justify-content: center;
-}
-.qc {
-  height: 45px;
-  padding: 10px 16px;
-  border: none;
-  border-radius: 12px;
-  background: var(--chip-bg);
-  color: var(--text);
-  font-size: 16px;
-  font-weight: 400;
-  letter-spacing: 0.063px;
-  cursor: pointer;
-  transition: background 0.14s;
-}
-.qc:hover {
-  background: var(--active-bg);
-}
-
-/* ── 输入卡（设计稿）：纯白、18px 圆角、无描边，只用一层绿色辉光托住 ── */
+/* ── 输入卡（设计稿）：18px 圆角 + 1px 品牌渐变描边（左青右绿）+ 一层绿色辉光 ──
+   描边必须是实心的，不能只靠辉光：辉光只有 ~20% 不透明度，压到吉祥物的白色身体上
+   就完全看不见了，卡沿那条线会在猫这里断一截，看着像「边框被猫啃掉」。
+   渐变描边靠双层背景实现：padding-box 那层铺卡面底色，border-box 那层铺 --brand-grad，
+   1px 的透明 border 正好把渐变露出来当描边。 */
 .composer {
   position: relative;
   z-index: 1;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 18px;
-  background: var(--panel);
+  background:
+    linear-gradient(var(--panel), var(--panel)) padding-box,
+    var(--brand-grad) border-box;
   padding: 20px 20px 14px;
   box-shadow: 0 2px 13.4px var(--brand-glow);
   transition: box-shadow 0.2s cubic-bezier(0.32, 0.72, 0, 1);

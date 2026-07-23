@@ -2053,7 +2053,7 @@ async function deleteCurrentConv() {
         >
           <!-- 设计稿的回复块头部：29px 圆头像 + LUMI 名字行(原来是无头像的 Codex 式裸文本) -->
           <div class="ai-head">
-            <span class="ai-av"><img src="/mascot/mascot.png" alt="LUMI" /></span>
+            <span class="ai-av"><img src="/mascot/mascot.png?v=2" alt="LUMI" /></span>
             <span class="ai-name">LUMI</span>
           </div>
 
@@ -3197,8 +3197,9 @@ html[data-theme="aurora-dark"] .turn + .turn {
   flex-shrink: 0;
   border-radius: 50%;
   overflow: hidden;
-  /* LUMI 猫形机器人头像（与首页吉祥物同一形象），底色贴近页面白，与主题无关 */
-  background: #f1f1f3;
+  /* LUMI 猫形机器人头像（与首页吉祥物同一形象）。PNG 自带透明底，这里不能再垫
+     任何底色，否则护眼 / 深色主题下会在头像后面露出一块白色圆形幕板。 */
+  background: transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;

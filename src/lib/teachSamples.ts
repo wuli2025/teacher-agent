@@ -86,6 +86,17 @@ const DECKS: Record<string, { fileName: string; pages: number }> = {
   fanben_chun: { fileName: "语文《春》朱自清·精读课.pptx", pages: 19 },
   fanben_solar: { fileName: "English·Solar System.pptx", pages: 19 },
   fanben_seasons: { fileName: "English·The Four Seasons.pptx", pages: 19 },
+  // 高中数学 10 套核心概念课（2026-07 批次交付，16:9，公式/推导图 Manim 渲染）
+  senior_math_derivative: { fileName: "导数的概念与几何意义_课件.pptx", pages: 12 },
+  senior_math_integral: { fileName: "定积分与微积分基本定理_课件.pptx", pages: 12 },
+  senior_math_ellipse: { fileName: "椭圆的定义与性质_课件.pptx", pages: 12 },
+  senior_math_induction: { fileName: "数列与数学归纳法_课件.pptx", pages: 12 },
+  senior_math_bayes: { fileName: "条件概率与贝叶斯定理_课件.pptx", pages: 16 },
+  senior_math_trig_graph: { fileName: "三角函数图像与变换_课件.pptx", pages: 12 },
+  senior_math_complex: { fileName: "复数与复平面_课件.pptx", pages: 12 },
+  senior_math_space_vector: { fileName: "空间向量与立体几何_课件.pptx", pages: 12 },
+  senior_math_matrix: { fileName: "线性方程组与矩阵_课件.pptx", pages: 12 },
+  senior_math_limit: { fileName: "函数的极限与连续_课件.pptx", pages: 12 },
 };
 
 /** 给范例挂上原课件真源。deckId 缺省时：范例 id 本身是 deck，否则封面名即 deck（数学/教案范例复用课件封面）。 */
@@ -103,7 +114,7 @@ const PPT_SAMPLES: TeachSample[] = withDecks([
   { id: "pri_math_fraction", title: "分数的初步认识", subtitle: "平均分 · 初步认识", cover: "pri_math_fraction", grade: "小学", by: "数学", prompt: "生成一份小学数学《分数的初步认识》完整课件，含平均分情境、几分之一与直观图示。" },
   { id: "pri_math_angle", title: "角的度量", subtitle: "量角器 · 度数", cover: "pri_math_angle", grade: "小学", by: "数学", prompt: "生成一份小学数学《角的度量》完整课件，含量角器用法、度数读取与练习。" },
   { id: "pri_chinese_autumn", title: "秋天的雨", subtitle: "写景散文 · 朗读", cover: "pri_chinese_autumn", grade: "小学", by: "语文", prompt: "生成一份小学语文《秋天的雨》完整课件，含优美语句品读与朗读指导。" },
-  { id: "moral_honesty", title: "诚实守信", subtitle: "品德养成 · 明理", cover: "moral_honesty", grade: "小学", by: "道法", prompt: "生成一份《诚实守信》道德与法治课件，含故事情境、辨析与行为指导。" },
+  { id: "moral_honesty", title: "诚实守信", subtitle: "品德养成 · 明理", cover: "moral_honesty", grade: "小学", by: "政治", prompt: "生成一份《诚实守信》道德与法治课件，含故事情境、辨析与行为指导。" },
   { id: "english_season", title: "My Favourite Season", subtitle: "季节主题 · 口语", cover: "english_season", grade: "小学", by: "英语", prompt: "Generate a complete courseware on 'My Favourite Season' for a primary English class." },
   { id: "fanben_seasons", deckId: "fanben_seasons", title: "The Four Seasons", subtitle: "四季 · 词汇句型", cover: "", grade: "小学", by: "英语 · 精品范本", prompt: "Generate a complete primary English courseware on 'The Four Seasons' with vocabulary, sentence patterns and activities." },
   { id: "chinese_cibeiguu", title: "次北固山下", subtitle: "律诗鉴赏 · 情景交融", cover: "chinese_cibeiguu", grade: "初中", by: "语文", prompt: "生成一份初中语文《次北固山下》完整课件，含律诗格律、意象与思乡情感赏析。" },
@@ -130,8 +141,19 @@ const PPT_SAMPLES: TeachSample[] = withDecks([
   { id: "fanben_xiaoshuo", deckId: "fanben_xiaoshuo", title: "现代文阅读 · 小说", subtitle: "情节 · 人物 · 主题", cover: "", grade: "高中", by: "语文 · 精品范本", prompt: "生成一份高考现代文阅读（小说）专题课件，含情节结构、人物形象与主题探究答题法。" },
 ]);
 
-// ─────────── 生成数学课件（难度更高）：取数学学科的真课件作示例 ───────────
+// ─────────── 生成数学课件（难度更高）：高中 10 套核心概念课（真课件）+ 初小 4 套 ───────────
+// 高中 10 套无 cover 名：卡片封面直接用课件第 1 页缩略图（真版式即封面）。
 const MATH_SAMPLES: TeachSample[] = withDecks([
+  { id: "senior_math_derivative", title: "导数的概念与几何意义", subtitle: "瞬时变化率 · 切线斜率", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《导数的概念与几何意义》课件，从平均变化率到瞬时变化率，用切线读懂局部变化，含完整推导与典型例题。" },
+  { id: "senior_math_limit", title: "函数的极限与连续", subtitle: "极限思想 · 连续性", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《函数的极限与连续》课件，含极限的直观理解、严谨表述、连续性判定与典型例题。" },
+  { id: "senior_math_integral", title: "定积分与微积分基本定理", subtitle: "曲边梯形 · 牛顿-莱布尼茨", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《定积分与微积分基本定理》课件，从曲边梯形面积引入，含定积分定义、基本定理推导与计算例题。" },
+  { id: "senior_math_ellipse", title: "椭圆的定义与性质", subtitle: "定义 · 标准方程", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《椭圆的定义与性质》课件，含定义生成过程、标准方程推导、几何性质与典型例题。" },
+  { id: "senior_math_induction", title: "数列与数学归纳法", subtitle: "递推 · 归纳证明", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《数列与数学归纳法》课件，含递推关系、归纳法两步框架、证明规范与变式训练。" },
+  { id: "senior_math_bayes", title: "条件概率与贝叶斯定理", subtitle: "条件概率 · 逆向推断", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《条件概率与贝叶斯定理》课件，含条件概率定义、乘法公式、全概率公式、贝叶斯定理与易错辨析。" },
+  { id: "senior_math_trig_graph", title: "三角函数图像与变换", subtitle: "图像 · 平移伸缩", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《三角函数图像与变换》课件，含 y=Asin(ωx+φ) 的图像、平移伸缩变换规律与典型例题。" },
+  { id: "senior_math_complex", title: "复数与复平面", subtitle: "复数运算 · 几何意义", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《复数与复平面》课件，含复数概念、四则运算、复平面几何意义与模的应用。" },
+  { id: "senior_math_space_vector", title: "空间向量与立体几何", subtitle: "向量法 · 空间角", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《空间向量与立体几何》课件，含空间向量基础、法向量求法与用向量法求空间角、距离的完整例题。" },
+  { id: "senior_math_matrix", title: "线性方程组与矩阵", subtitle: "消元 · 矩阵表示", cover: "", grade: "高中", by: "数学", prompt: "生成一份高中数学《线性方程组与矩阵》课件，含消元法、矩阵表示、初等行变换与解的讨论。" },
   { id: "m_pythagoras", title: "勾股定理", subtitle: "多种证明 · 应用", cover: "math_pythagoras", grade: "初中", by: "数学", prompt: "生成一份《勾股定理》数学课件，含面积法/拼图法等多种严谨证明与实际应用题（公式规范排版）。" },
   { id: "m_rational_add", title: "有理数的加法", subtitle: "数轴模型 · 法则", cover: "math_rational_add", grade: "初中", by: "数学", prompt: "生成一份《有理数的加法》数学课件，含数轴模型、同异号法则推导与分层练习。" },
   { id: "m_fraction", title: "分数的初步认识", subtitle: "平均分 · 直观", cover: "pri_math_fraction", grade: "小学", by: "数学", prompt: "生成一份《分数的初步认识》数学课件，含平均分情境、几分之一直观图与操作活动。" },
@@ -242,7 +264,7 @@ export const MODES: Record<TeachMode, ModeDef> = {
   },
 };
 
-export const MODE_ORDER: TeachMode[] = ["ppt", "lesson", "math"];
+export const MODE_ORDER: TeachMode[] = ["lesson", "ppt", "math"];
 export const GRADES: Grade[] = ["全部", "小学", "初中", "高中", "其他"];
 
 // ─────────── 学科筛选 ───────────
@@ -257,5 +279,5 @@ export function subjectsOf(samples: TeachSample[]): string[] {
   return [...set].sort((a, b) => (SUBJECT_RANK[a] ?? 99) - (SUBJECT_RANK[b] ?? 99));
 }
 const SUBJECT_RANK: Record<string, number> = {
-  语文: 0, 数学: 1, 英语: 2, 物理: 3, 化学: 4, 生物: 5, 道法: 6, 历史: 7, 地理: 8,
+  语文: 0, 数学: 1, 英语: 2, 物理: 3, 化学: 4, 生物: 5, 政治: 6, 历史: 7, 地理: 8,
 };

@@ -151,7 +151,7 @@ const sortedConvs = computed<Conversation[]>(() => {
       </button>
     </div>
 
-    <!-- Nav（设计稿顺序）：新建对话 / AI 课件PPT / AI 教案 / 生成数学课件 / 知识库 / 更多 / 设置
+    <!-- Nav 顺序：新建对话 / AI 教案 / AI 课件PPT / 生成数学课件 / 知识库 / 更多 / 设置
          —— 「新建对话」不再是蓝色大 CTA，而是与其它功能同规格的导航首项 -->
     <nav class="nav">
       <button

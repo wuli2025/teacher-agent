@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { CircleCheck, CircleAlert, Info, X } from "@lucide/vue";
-import { useToastQueue, type ToastKind } from "../composables/useToast";
+import { useToastQueue, type ToastAction, type ToastItem, type ToastKind } from "../composables/useToast";
 
 const { items, dismiss } = useToastQueue();
 
@@ -9,6 +9,12 @@ const icons: Record<ToastKind, any> = {
   error: CircleAlert,
   info: Info,
 };
+
+// 先关再执行:动作抛错也不能把询问 toast 留在屏上
+function act(t: ToastItem, a: ToastAction) {
+  dismiss(t.id);
+  a.onClick?.();
+}
 </script>
 
 <template>
@@ -17,6 +23,17 @@ const icons: Record<ToastKind, any> = {
       <div v-for="t in items" :key="t.id" class="toast" :class="t.kind">
         <component :is="icons[t.kind]" :size="15" :stroke-width="2" class="t-ic" />
         <span class="t-text">{{ t.text }}</span>
+        <span v-if="t.actions?.length" class="t-actions">
+          <button
+            v-for="(a, i) in t.actions"
+            :key="i"
+            class="t-btn"
+            :class="{ primary: a.primary }"
+            @click="act(t, a)"
+          >
+            {{ a.label }}
+          </button>
+        </span>
         <button class="t-close" @click="dismiss(t.id)">
           <X :size="12" :stroke-width="2.2" />
         </button>
@@ -67,6 +84,32 @@ const icons: Record<ToastKind, any> = {
 }
 .t-text {
   word-break: break-word;
+}
+.t-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+.t-btn {
+  padding: 4px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.t-btn:hover {
+  filter: brightness(0.96);
+}
+.t-btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
 }
 .t-close {
   display: inline-flex;
