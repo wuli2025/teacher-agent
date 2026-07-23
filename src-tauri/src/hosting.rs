@@ -472,7 +472,12 @@ mod tests {
         // 无 /ws 长连接时 graceful shutdown 应迅速完成;随后同端口必须能立刻重绑
         //(修复2的核心诉求:停机不泄漏端口,stop→start 能回到原端口)。
         let _ = tokio::time::timeout(std::time::Duration::from_secs(3), serve_task).await;
-        let l = tokio::net::TcpListener::bind(("0.0.0.0", port))
+        // 重绑必须用 start_core 当初那个 bind_ip(默认 127.0.0.1),不能写死 0.0.0.0:
+        // Windows 下 127.0.0.1:P 与 0.0.0.0:P 可并存,所以别的进程占着 0.0.0.0:8484 时
+        // start_core 照样能拿到 127.0.0.1:8484,这里再去绑 0.0.0.0 就撞的是**那个进程**,
+        // 与「本服务停机是否泄漏端口」毫无关系 —— 开发机上跑着旧版应用即必红,CI 上却常绿。
+        let bind_ip: &str = if super::lan_access_enabled() { "0.0.0.0" } else { "127.0.0.1" };
+        let l = tokio::net::TcpListener::bind((bind_ip, port))
             .await
             .expect("停机后应能立刻重绑同端口");
         drop(l);
