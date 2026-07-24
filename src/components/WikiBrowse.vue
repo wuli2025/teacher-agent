@@ -17,6 +17,7 @@ import {
   Waypoints,
 } from "@lucide/vue";
 import OrbitSpinner from "./icons/OrbitSpinner.vue";
+import KbAskDock from "./KbAskDock.vue";
 import {
   kb,
   scan,
@@ -655,6 +656,8 @@ function sendTableCmd() {
         </div>
         <div v-else class="md" v-html="rendered"></div>
       </div>
+      <!-- 问知识库:右侧可收纳对话框。答案只依据库里资料,来源角标点开即在中栏读原文 -->
+      <KbAskDock storage-key="kbAsk.open.wiki" @open="openFile" />
     </div>
 
     <div v-if="tab === 'manage'" class="body manage">
@@ -917,9 +920,10 @@ function sendTableCmd() {
   flex-direction: column;
   gap: 18px;
 }
+/* 三栏:文件列表 / 正文 / 问知识库(第三栏宽度由它自己的收起态决定,收起只占一条把手) */
 .body.browse {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 320px 1fr auto;
   gap: 16px;
   height: calc(100vh - 130px);
 }

@@ -1,9 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, onActivated, onDeactivated, nextTick } from "vue";
+import {
+  ref,
+  computed,
+  onMounted,
+  onUnmounted,
+  onActivated,
+  onDeactivated,
+  nextTick,
+} from "vue";
 import cytoscape, { type Core } from "cytoscape";
 // @ts-ignore — cytoscape-fcose 无类型声明
 import fcose from "cytoscape-fcose";
 import { kb, files as filesApi, type KbGraph, type KbNode } from "../tauri";
+import KbAskDock from "./KbAskDock.vue";
 
 // KeepAlive 的 include 按组件 name 匹配 → 显式命名，确保本视图被缓存
 defineOptions({ name: "KnowledgeGraph" });
@@ -28,7 +37,16 @@ const container = ref<HTMLDivElement | null>(null);
 const stats = ref({ docs: 0, folders: 0, edges: 0, memories: 0 });
 const empty = ref(false);
 const showFolders = ref(true);
-const spinning = ref(true); // 初始即自动旋转
+// 右侧「问知识库」是否展开 —— 展开时把节点信息卡往左挪,别被面板压住。
+// 嵌入用法(向导 / 文件中心星图)不挂问答面板,信息卡照旧贴右缘。
+const askOpen = ref(false);
+const hasDock = !props.embedded && !isFiles;
+const cardRight = computed(() =>
+  !hasDock ? "16px" : askOpen.value ? "358px" : "62px",
+);
+// 默认静止:自转虽好看,但一直转会让人读不住标签、也点不准节点(要追着动的星点点)。
+// 想看它转的按工具栏「旋转」自开;这里只保留能力,不再默认跑 RAF。
+const spinning = ref(false);
 const query = ref("");
 const selected = ref<{
   title: string;
@@ -441,6 +459,35 @@ function toggleFolders() {
   showFolders.value = !showFolders.value;
   render();
 }
+// 「问知识库」面板里点来源角标 → 在星图里定位那颗星(星图上没有该节点就退回搜索高亮)。
+// 星图不是文件浏览器,能做的最贴切的响应就是「把它指给你看」。
+function focusSource(path: string) {
+  if (!cy) return;
+  const n = cy.getElementById(path);
+  if (!n || n.empty()) {
+    query.value = (path.split("/").pop() ?? path).replace(/\.md$/i, "");
+    runSearch();
+    return;
+  }
+  cancelSpinLoop(); // 定位期间别让自转把目标转走(spinning 为真时下面动画结束再续)
+  cy.batch(() => {
+    cy!.elements().removeClass("faded hl").addClass("faded");
+    n.closedNeighborhood().removeClass("faded").addClass("hl");
+  });
+  const d = n.data();
+  selected.value = {
+    title: d.label,
+    kind: d.kind,
+    path: d.path,
+    deg: d.deg,
+    summary: d.summary,
+  };
+  cy.animate(
+    { center: { eles: n }, zoom: Math.max(cy.zoom(), 1.1) },
+    { duration: 400, complete: () => startSpinLoop() },
+  );
+}
+
 function runSearch() {
   if (!cy) return;
   const q = query.value.trim().toLowerCase();
@@ -574,8 +621,18 @@ onUnmounted(() => {
         >
       </div>
 
+      <!-- 问知识库:星河右缘可收纳对话框(收起只剩一条竖把手,不挡星图) -->
+      <KbAskDock
+        v-if="!embedded && !isFiles"
+        class="graph-dock"
+        theme="dark"
+        storage-key="kbAsk.open.graph"
+        @toggle="askOpen = $event"
+        @open="focusSource"
+      />
+
       <transition name="fade">
-        <div v-if="selected" class="card">
+        <div v-if="selected" class="card" :style="{ right: cardRight }">
           <div class="card-kind">
             {{
               selected.kind === "root"
@@ -833,11 +890,20 @@ onUnmounted(() => {
 .legend .dot.sq {
   border-radius: 2px;
 }
+/* 问知识库浮层:贴右缘悬浮在星河之上(cy 画布 z=2 / 暗角 z=3 之上) */
+.graph-dock {
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  bottom: 14px;
+  height: auto; /* 组件自带 height:100%,这里要让 top/bottom 说了算,否则底部溢出 14px */
+  z-index: 5;
+}
 .card {
   position: absolute;
-  right: 16px;
   top: 16px;
   z-index: 4;
+  transition: right 0.2s var(--ease-out);
   width: 244px;
   background: rgba(10, 14, 28, 0.72);
   border: 1px solid rgba(150, 180, 255, 0.2);

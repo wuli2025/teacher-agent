@@ -451,6 +451,12 @@ fn dispatch_sync(cmd: &str, a: &Args, app: AppHandle) -> Result<Value, String> {
         "kb_graph" => ok(kb::kb_graph()),
         "kb_lint" => ok(kb::kb_lint()),
         "kb_enrich_links" => ok(kb::kb_enrich_links(app)?),
+        "kb_ask" => ok(kb::kb_ask(
+            app,
+            req_str(a, "question")?,
+            a.get("history")
+                .and_then(|v| serde_json::from_value(v.clone()).ok()),
+        )?),
         "kb_dedup" => ok(kb::kb_dedup(app)?),
         "kb_scan_sources" => ok(kb::kb_scan_sources()),
         "kb_quarantine" => ok(kb::kb_quarantine(req_str(a, "relPath")?)?),

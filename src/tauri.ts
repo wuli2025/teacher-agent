@@ -629,6 +629,29 @@ export interface KbCompileEvent {
   docCount?: number;
 }
 
+/** 「问知识库」引用的来源(角标 chip → 点开可读原文) */
+export interface KbAskSource {
+  idx: number;
+  title: string;
+  path: string;
+}
+
+/** 「问知识库」一问一答的流式事件 (kb:ask) */
+export interface KbAskEvent {
+  runId: string;
+  /** phase | sources | tool | delta | done | error */
+  kind: string;
+  text?: string;
+  /** 仅 sources: 本轮召回的资料清单 */
+  sources?: KbAskSource[];
+}
+
+/** 「问知识库」带上去的历史轮次(让追问接得上上下文) */
+export interface KbAskTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
 /** 知识库拖拽上传的逐文件结果 */
 export interface KbUploadResult {
   name: string;
@@ -732,6 +755,9 @@ export const kb = {
   dedup: () => invoke<string>("kb_dedup"),
   search: (q: string, topK = 8) =>
     invoke<KbHit[]>("kb_search", { query: q, topK }),
+  /** 问知识库：召回相关资料 + 只读 claude 作答。返回 runId，答案走 kb:ask 事件流。 */
+  ask: (question: string, history: KbAskTurn[] = []) =>
+    invoke<string>("kb_ask", { question, history }),
   list: (subdir: string | null = null) =>
     invoke<string[]>("kb_list", { subdir }),
   read: (relPath: string) => invoke<string>("kb_read", { relPath }),
@@ -1916,6 +1942,10 @@ function browserStub(cmd: string, _args?: Record<string, unknown>): unknown {
       return "kbc-stub";
     case "kb_search":
       return [];
+    // 纯前端预览没有后端可跑 claude：返回 runId 但永远不会有 kb:ask 事件，
+    // 面板会一直转 —— 故这里直接抛，让面板走它的错误分支给出明确提示。
+    case "kb_ask":
+      throw new Error("浏览器预览模式不支持「问知识库」，请在桌面端使用");
     case "kb_list":
       return [];
     case "kb_read":

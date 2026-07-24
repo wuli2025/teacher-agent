@@ -19,6 +19,7 @@ pub mod scan;
 // 知识网构建管线(原 kb/compile.rs)已归位 polaris-wiki crate;调用方已切 `wiki::kb_compile`
 // (fable 仓不得向上依赖 wiki —— 依赖层级 3→2 只许 wiki 向下)。
 pub mod access;
+pub mod ask;
 pub mod enrich;
 pub mod graph;
 pub mod ingest;
@@ -54,6 +55,7 @@ pub(crate) use tauri::{AppHandle, Emitter, Manager};
 pub(crate) use walkdir::WalkDir;
 
 pub use access::*;
+pub use ask::*;
 pub use enrich::*;
 pub use graph::*;
 pub use ingest::*;

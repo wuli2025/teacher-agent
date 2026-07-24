@@ -218,6 +218,8 @@ pub fn run() {
             kb::kb_lint,
             kb::kb_enrich_links,
             kb::kb_dedup,
+            // 问知识库:检索 + 只读 claude 的一问一答(答案走 kb:ask 事件流)
+            kb::kb_ask,
             // 信源安全:提示词注入痕迹扫描 + 命中文件隔离(纯规则,只读扫描/移动到隔离区）
             kb::kb_scan_sources,
             kb::kb_quarantine,
